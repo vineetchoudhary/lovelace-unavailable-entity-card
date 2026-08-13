@@ -1,0 +1,830 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Unavailable Entity Card — test suite</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --fg: #1b1c1e;
+    --muted: #6b7076;
+    --panel: #fff;
+    --line: #e3e5e9;
+    --pass: #1b873f;
+    --fail: #c62828;
+    --pass-bg: #e8f5e9;
+    --fail-bg: #fdecea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #131417;
+      --fg: #e7e8ea;
+      --muted: #9aa0a6;
+      --panel: #1c1e22;
+      --line: #2c2f35;
+      --pass: #58d68d;
+      --fail: #ff7b72;
+      --pass-bg: #16281c;
+      --fail-bg: #2d1a1a;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 32px 24px 64px;
+    background: var(--bg);
+    color: var(--fg);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 32px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  #banner {
+    display: none;
+    padding: 16px 20px;
+    border-radius: 10px;
+    background: var(--fail-bg);
+    border: 1px solid var(--fail);
+    color: var(--fail);
+    margin-bottom: 24px;
+  }
+  #banner code {
+    display: block;
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: var(--panel);
+    border-radius: 6px;
+    color: var(--fg);
+    user-select: all;
+  }
+
+  #summary {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 18px 22px;
+    border-radius: 10px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    position: sticky;
+    top: 0;
+    z-index: 5;
+  }
+  #score { font: 700 22px/1 ui-monospace, monospace; }
+  #score.ok { color: var(--pass); }
+  #score.bad { color: var(--fail); }
+  #summary .spacer { flex: 1; }
+  label.toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); cursor: pointer; }
+
+  .group { margin-top: 20px; }
+  .group > h3 {
+    font: 600 12px/1 ui-monospace, monospace;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 20px 0 8px;
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 58px 1fr;
+    gap: 10px;
+    padding: 7px 12px;
+    border-radius: 6px;
+    align-items: start;
+  }
+  .row + .row { margin-top: 2px; }
+  .row .tag { font: 700 11px/1.5 ui-monospace, monospace; }
+  .row.pass { background: var(--pass-bg); }
+  .row.pass .tag { color: var(--pass); }
+  .row.fail { background: var(--fail-bg); }
+  .row.fail .tag { color: var(--fail); }
+  .row .detail { display: block; color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; margin-top: 4px; word-break: break-all; }
+  body.only-fails .row.pass { display: none; }
+  body.only-fails .group.all-pass { display: none; }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 20px; }
+  .themes { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 780px) { .themes { grid-template-columns: 1fr; } }
+  .theme-pane { padding: 18px; border-radius: 10px; }
+  .theme-pane > h4 { margin: 0 0 14px; font: 600 11px/1 ui-monospace, monospace; letter-spacing: .1em; text-transform: uppercase; }
+  .stack { display: grid; gap: 14px; }
+
+  .theme-light {
+    --rgb-primary-color: 0, 154, 199;
+    --rgb-primary-text-color: 33, 33, 33;
+    --rgb-secondary-text-color: 114, 114, 114;
+    --rgb-warning-color: 255, 166, 0;
+    --primary-color: #009ac7;
+    --primary-text-color: #212121;
+    --secondary-text-color: #727272;
+    --warning-color: #ffa600;
+    --card-background-color: #fff;
+    --ha-card-border-radius: 12px;
+    background: #f2f4f9;
+  }
+  .theme-light > h4 { color: #212121; }
+  .theme-dark {
+    --rgb-primary-color: 0, 154, 199;
+    --rgb-primary-text-color: 225, 225, 225;
+    --rgb-secondary-text-color: 155, 155, 155;
+    --rgb-warning-color: 255, 166, 0;
+    --primary-color: #009ac7;
+    --primary-text-color: #e1e1e1;
+    --secondary-text-color: #9b9b9b;
+    --warning-color: #ffa600;
+    --card-background-color: #1c1c1c;
+    --ha-card-border-radius: 12px;
+    background: #111114;
+  }
+  .theme-dark > h4 { color: #e1e1e1; }
+
+  /* ---- hover bounce comparison harness ---- */
+  .bounce { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 780px) { .bounce { grid-template-columns: 1fr; } }
+  .bounce-col > h4 { margin: 0 0 10px; font: 600 12px/1 ui-monospace, monospace; }
+  .bounce-col .hint { color: var(--muted); font-size: 12px; margin: 0 0 12px; }
+  .probe {
+    display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 14px;
+    padding: 14px 16px; border-radius: 12px;
+    background: rgba(127, 127, 127, .12);
+    border: 1px solid rgba(127, 127, 127, .2);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, .08);
+  }
+  .probe + .probe { margin-top: 12px; }
+  .probe .dot { width: 26px; height: 26px; border-radius: 8px; background: rgba(0, 154, 199, .25); }
+  .probe .chip { font: 700 10px/1 ui-monospace, monospace; letter-spacing: .06em; padding: 6px 9px; border-radius: 999px; background: rgba(255, 166, 0, .18); color: #b07400; }
+
+  /* OLD rule, as shipped before the fix: moves the tile out from under the cursor */
+  #old-probes .probe { transition: transform 120ms ease, box-shadow 120ms ease; }
+  #old-probes .probe:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0, 0, 0, .14); }
+
+  /* NEW rule: nothing that affects geometry */
+  #new-probes .probe { transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease; }
+  #new-probes .probe:hover {
+    background: rgba(127, 127, 127, .2);
+    border-color: rgba(127, 127, 127, .32);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, .14);
+  }
+
+  .meter { margin-top: 12px; font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted); }
+  .meter b { color: var(--fg); font-variant-numeric: tabular-nums; }
+  .meter .warn { color: var(--fail); font-weight: 700; }
+  .meter .good { color: var(--pass); font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Unavailable Entity Card — test suite</h1>
+  <p class="sub">
+    Loads <code>../unavailable-entity-card.js</code> directly, so this always exercises the real card file.
+  </p>
+
+  <div id="banner">
+    <strong>The card file could not be loaded.</strong>
+    Firefox and Safari block reading a parent directory over <code class="mono">file://</code>.
+    Serve the repo over HTTP from the project root and open
+    <span class="mono">http://localhost:8000/test/</span>:
+    <code>python3 -m http.server 8000</code>
+  </div>
+
+  <div id="summary">
+    <span id="score">running…</span>
+    <span id="score-label" style="color:var(--muted)"></span>
+    <span class="spacer"></span>
+    <label class="toggle"><input type="checkbox" id="only-fails"> show failures only</label>
+  </div>
+
+  <div id="results"></div>
+
+  <h2>Rendered output</h2>
+  <div class="panel">
+    <div class="themes">
+      <div class="theme-pane theme-light"><h4>Light theme</h4><div class="stack" id="visual-light"></div></div>
+      <div class="theme-pane theme-dark"><h4>Dark theme</h4><div class="stack" id="visual-dark"></div></div>
+    </div>
+  </div>
+
+  <h2>Hover bounce — issue reproduction</h2>
+  <div class="panel">
+    <p class="sub" style="margin-top:0">
+      Move your cursor slowly onto the <strong>bottom edge</strong> of a tile in each column and watch the counters.
+      The old rule lifts the tile by 1px on hover, which slides its bottom edge above a cursor resting on that row —
+      hover is lost, the tile drops back, and it oscillates. The counters below tick up without you moving the mouse.
+    </p>
+    <div class="bounce">
+      <div class="bounce-col">
+        <h4>Before — <code>transform: translateY(-1px)</code></h4>
+        <p class="hint">Expected: enter/leave climb, geometry flips between two values.</p>
+        <div id="old-probes">
+          <div class="probe" data-probe="old"><span class="dot"></span><span>Living Room Temperature</span><span class="chip">UNAVAILABLE</span></div>
+          <div class="probe"><span class="dot"></span><span>Garage Door</span><span class="chip">UNKNOWN</span></div>
+        </div>
+        <div class="meter" id="meter-old"></div>
+      </div>
+      <div class="bounce-col">
+        <h4>After — background / border / shadow only</h4>
+        <p class="hint">Expected: one enter, zero leaves, geometry never changes.</p>
+        <div id="new-probes">
+          <div class="probe" data-probe="new"><span class="dot"></span><span>Living Room Temperature</span><span class="chip">UNAVAILABLE</span></div>
+          <div class="probe"><span class="dot"></span><span>Garage Door</span><span class="chip">UNKNOWN</span></div>
+        </div>
+        <div class="meter" id="meter-new"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* Minimal stand-ins for the Home Assistant components the card renders. */
+(function () {
+  class HaCard extends HTMLElement {
+    constructor() {
+      super();
+      this.attachShadow({ mode: "open" }).innerHTML =
+        '<style>:host{display:block;border-radius:var(--ha-card-border-radius,12px);' +
+        'box-shadow:0 2px 2px rgba(0,0,0,.14)}</style><slot></slot>';
+    }
+  }
+  customElements.define("ha-card", HaCard);
+
+  var PATHS = {
+    "mdi:chevron-down": "M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z",
+    "mdi:alert-circle-outline": "M11,15H13V17H11V15M11,7H13V13H11V7M12,2C6.47,2 2,6.5 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20Z",
+    "mdi:help-circle-outline": "M11,18H13V16H11V18M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20M12,6A4,4 0 0,0 8,10H10A2,2 0 0,1 12,8A2,2 0 0,1 14,10C14,12 11,11.75 11,15H13C13,12.75 16,12.5 16,10A4,4 0 0,0 12,6Z",
+    "mdi:garage": "M3,6V19H5V17H19V19H21V6H3M5,8H19V15H5V8Z",
+    "mdi:thermometer": "M15,13V5A3,3 0 0,0 9,5V13A5,5 0 1,0 15,13Z"
+  };
+  class HaIcon extends HTMLElement {
+    static get observedAttributes() { return ["icon"]; }
+    connectedCallback() { this._draw(); }
+    attributeChangedCallback() { this._draw(); }
+    _draw() {
+      if (!this.shadowRoot) this.attachShadow({ mode: "open" });
+      var d = PATHS[this.getAttribute("icon")] || PATHS["mdi:alert-circle-outline"];
+      this.shadowRoot.innerHTML =
+        '<style>:host{display:inline-flex;width:24px;height:24px}svg{width:100%;height:100%;fill:currentColor}</style>' +
+        '<svg viewBox="0 0 24 24"><path d="' + d + '"></path></svg>';
+    }
+  }
+  customElements.define("ha-icon", HaIcon);
+})();
+</script>
+
+<script src="../unavailable-entity-card.js"></script>
+
+<script>
+(function () {
+  "use strict";
+
+  if (!customElements.get("unavailable-entity-card")) {
+    document.getElementById("banner").style.display = "block";
+    document.getElementById("score").textContent = "not run";
+    document.getElementById("score").className = "bad";
+    return;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * assertion helpers
+   * ------------------------------------------------------------------ */
+  var results = [];
+  var group = "";
+  var section = function (name) { group = name; };
+  var ok = function (name, pass, detail) {
+    results.push({ group: group, name: name, pass: !!pass, detail: detail == null ? "" : String(detail) });
+  };
+  var eq = function (name, actual, expected) {
+    ok(name, Object.is(actual, expected),
+       "got=" + JSON.stringify(actual) + " want=" + JSON.stringify(expected));
+  };
+
+  /* ------------------------------------------------------------------ *
+   * Home Assistant frontend logic, transcribed from source so the card
+   * is checked against how HA actually resolves it.
+   *   src/data/lovelace_custom_cards.ts
+   *   src/panels/lovelace/create-element/create-element-base.ts
+   *   src/panels/lovelace/editor/card-editor/hui-card-picker.ts
+   * ------------------------------------------------------------------ */
+  var CUSTOM_PREFIX = "custom:";
+  var isCustomType = function (t) { return t.indexOf(CUSTOM_PREFIX) === 0; };
+  var stripCustomPrefix = function (t) { return t.slice(CUSTOM_PREFIX.length); };
+  var getCustomTag = function (t) { return isCustomType(t) ? stripCustomPrefix(t) : undefined; };
+
+  // getLovelaceElementClass(), synchronous portion
+  var resolveCardClass = function (type) {
+    var tag = getCustomTag(type);
+    if (!tag) return { status: "not-custom" };
+    if (customElements.get(tag)) return { status: "resolved", tag: tag };
+    if (tag.indexOf("-") === -1) return { status: "throw", error: "Custom element not found: " + tag };
+    return { status: "timeout-2s", error: "Custom element not found: " + tag };
+  };
+  // hui-card-picker.ts: `type = `${CUSTOM_TYPE_PREFIX}${type}``
+  var pickerType = function (entry) { return CUSTOM_PREFIX + entry.type; };
+
+  var mk = function (id, state, attrs) {
+    return { entity_id: id, state: state, attributes: attrs || {} };
+  };
+  var hass = { states: {
+    "light.living_room": mk("light.living_room", "on", { friendly_name: "Living Room" }),
+    "sensor.kitchen": mk("sensor.kitchen", "unavailable", { friendly_name: "Kitchen Temp" }),
+    "binary_sensor.garage": mk("binary_sensor.garage", "unknown", { friendly_name: "Garage" }),
+    "sensor.ups": mk("sensor.ups", "offline", { friendly_name: "UPS" }),
+    "person.me": mk("person.me", "home", { entity_picture: "data:image/gif;base64,R0lGODlhAQABAAAAACw=", friendly_name: "Me" }),
+    "sensor.noise": mk("sensor.noise", "42", {})
+  } };
+
+  var sandbox = document.createElement("div");
+  sandbox.style.cssText = "position:absolute;left:-99999px;top:0;width:420px";
+  document.body.appendChild(sandbox);
+  var make = function (config, withHass) {
+    var el = document.createElement("unavailable-entity-card");
+    el.setConfig(config);
+    sandbox.appendChild(el);
+    if (withHass !== false) el.hass = hass;
+    return el;
+  };
+
+  /* ================================================================== *
+   * 1. issue #2 — card picker resolution
+   * ================================================================== */
+  section("1. Issue #2 — card picker resolution");
+  var entries = window.customCards.filter(function (c) { return c.name === "Unavailable Entity Card"; });
+  eq("registered exactly once", entries.length, 1);
+  eq("registry type carries no custom: prefix", entries[0].type, "unavailable-entity-card");
+  eq("picker builds the type HA expects", pickerType(entries[0]), "custom:unavailable-entity-card");
+
+  var resolved = resolveCardClass(pickerType(entries[0]));
+  eq("card class resolves synchronously — no spinner", resolved.status, "resolved");
+  eq("resolved tag", resolved.tag, "unavailable-entity-card");
+
+  var oldResolved = resolveCardClass(pickerType({ type: "custom:unavailable-entity-card" }));
+  eq("old registration would time out after 2s", oldResolved.status, "timeout-2s");
+  eq("old registration reproduces the reported error verbatim",
+     oldResolved.error, "Custom element not found: custom:unavailable-entity-card");
+  eq("dashboard yaml type also resolves",
+     resolveCardClass("custom:unavailable-entity-card").status, "resolved");
+  eq("registry entry previews in the picker", entries[0].preview, true);
+
+  /* ================================================================== *
+   * 2. stub config
+   * ================================================================== */
+  section("2. Stub config (Add Card preview)");
+  var Card = customElements.get("unavailable-entity-card");
+  var stub = Card.getStubConfig(hass, ["light.living_room", "sensor.kitchen"], []);
+  eq("stub type keeps the custom: prefix", stub.type, "custom:unavailable-entity-card");
+  eq("stub prefers entities that are actually unavailable",
+     JSON.stringify(stub.entities), '["sensor.kitchen"]');
+  ok("stub falls back to hass.states when given nothing",
+     Card.getStubConfig(hass, [], []).entities.length > 0);
+  ok("stub config is accepted by setConfig", (function () {
+    try { document.createElement("unavailable-entity-card").setConfig(stub); return true; }
+    catch (e) { return false; }
+  })());
+  ok("stub from an empty hass is still valid", (function () {
+    try {
+      document.createElement("unavailable-entity-card")
+        .setConfig(Card.getStubConfig({ states: {} }, [], []));
+      return true;
+    } catch (e) { return false; }
+  })());
+
+  /* ================================================================== *
+   * 3. rendering
+   * ================================================================== */
+  section("3. Rendering");
+  var card = make({
+    type: "custom:unavailable-entity-card",
+    title: "Critical sensors",
+    entities: [
+      "light.living_room",
+      { entity: "sensor.kitchen", name: "Kitchen Temp" },
+      "binary_sensor.garage",
+      "sensor.ups",
+      "sensor.ghost",
+      "person.me"
+    ],
+    unavailable_states: [
+      { state: "offline", background: "#f0f4c3", color: "#827717" },
+      { state: "home", background: "red; position:fixed; top:0" }
+    ]
+  });
+  var sr = card.shadowRoot;
+  var tiles = function () { return [].slice.call(sr.querySelectorAll(".entity-tile")); };
+  var tileFor = function (id) {
+    return tiles().filter(function (t) { return t.getAttribute("data-entity") === id; })[0];
+  };
+
+  eq("ha-card rendered", !!sr.querySelector("ha-card"), true);
+  eq("only offline entities listed", tiles().length, 5);
+  eq("entity in a normal state is excluded", !!tileFor("light.living_room"), false);
+  eq("entity missing from hass is listed", sr.textContent.indexOf("sensor.ghost") !== -1, true);
+  eq("missing entity uses the 'not available' label",
+     tiles().some(function (t) { return t.querySelector(".entity-state").textContent.trim() === "not available"; }), true);
+  eq("count badge", sr.querySelector(".entity-count").textContent, "5");
+  eq("count badge visible", sr.querySelector(".entity-count").hidden, false);
+  eq("custom 'offline' state included", !!tileFor("sensor.ups"), true);
+  var missingTile = tiles().filter(function (t) { return !t.hasAttribute("data-entity"); })[0];
+  eq("missing tile is not interactive", missingTile.classList.contains("interactive"), false);
+  eq("missing tile is not focusable", missingTile.hasAttribute("tabindex"), false);
+  eq("interactive tile is focusable", sr.querySelector(".entity-tile.interactive").getAttribute("tabindex"), "0");
+  eq("entity_picture rendered", !!sr.querySelector(".entity-visual img"), true);
+  eq("aria-expanded reflects expanded state", sr.querySelector(".card-header").getAttribute("aria-expanded"), "true");
+  eq("getGridOptions", JSON.stringify(card.getGridOptions()),
+     JSON.stringify({ columns: "full", rows: "auto", min_columns: 6, min_rows: 1 }));
+  eq("getCardSize", card.getCardSize(), 6);
+
+  section("3b. Per-state badge styling");
+  var upsBadge = tileFor("sensor.ups").querySelector(".entity-state");
+  eq("configured background applied", upsBadge.style.backgroundColor, "rgb(240, 244, 195)");
+  eq("configured color applied", upsBadge.style.color, "rgb(130, 119, 23)");
+  var meBadge = tileFor("person.me").querySelector(".entity-state");
+  eq("top-level semicolon injection stripped", meBadge.style.position, "");
+  eq("first declaration still survives", meBadge.style.backgroundColor, "red");
+  var leaked = [].slice.call(meBadge.style).filter(function (p) { return !/^(background|color|border)/.test(p); });
+  eq("nothing leaked outside background/color/border", JSON.stringify(leaked), "[]");
+
+  /* ================================================================== *
+   * 4. theme variables actually resolve
+   * ================================================================== */
+  section("4. Theme variables resolve");
+  var themed = document.createElement("div");
+  themed.className = "theme-light";
+  themed.style.cssText += ";position:absolute;left:-99999px;top:0;width:420px";
+  document.body.appendChild(themed);
+  var themedCard = document.createElement("unavailable-entity-card");
+  themedCard.setConfig({ type: "custom:unavailable-entity-card", entities: ["sensor.kitchen"] });
+  themed.appendChild(themedCard);
+  themedCard.hass = hass;
+
+  var themedTile = themedCard.shadowRoot.querySelector(".entity-tile");
+  var tileBg = getComputedStyle(themedTile).backgroundColor;
+  ok("tile background is not transparent", tileBg !== "rgba(0, 0, 0, 0)" && tileBg !== "transparent", tileBg);
+
+  var oldExpr = document.createElement("div");
+  oldExpr.style.cssText = "background: var(--tile-background, rgba(var(--rgb-secondary-background-color), 0.4))";
+  themed.appendChild(oldExpr);
+  eq("the variable the old CSS relied on is undefined in HA",
+     getComputedStyle(themed).getPropertyValue("--rgb-secondary-background-color").trim(), "");
+  eq("old background expression computed to fully transparent",
+     getComputedStyle(oldExpr).backgroundColor, "rgba(0, 0, 0, 0)");
+
+  var emptyCard = document.createElement("unavailable-entity-card");
+  emptyCard.setConfig({ type: "custom:unavailable-entity-card", entities: ["light.living_room"] });
+  themed.appendChild(emptyCard);
+  emptyCard.hass = hass;
+  var emptyEl = emptyCard.shadowRoot.querySelector(".empty-state");
+  ok("empty-state background is not transparent",
+     !!emptyEl && getComputedStyle(emptyEl).backgroundColor !== "rgba(0, 0, 0, 0)",
+     emptyEl ? getComputedStyle(emptyEl).backgroundColor : "no empty state");
+  eq("count badge hidden when nothing is unavailable",
+     emptyCard.shadowRoot.querySelector(".entity-count").hidden, true);
+
+  /* ================================================================== *
+   * 5. hover must not move the tile
+   * ================================================================== */
+  section("5. Hover cannot cause bouncing");
+  var sheet = sr.adoptedStyleSheets && sr.adoptedStyleSheets[0];
+  var cssText = sheet
+    ? [].slice.call(sheet.cssRules).map(function (r) { return r.cssText; }).join("\n")
+    : [].slice.call(sr.querySelectorAll("style")).map(function (s) { return s.textContent; }).join("\n");
+  var hoverRules = cssText.split("\n").filter(function (l) { return l.indexOf(":hover") !== -1; });
+
+  ok("a hover rule exists", hoverRules.length > 0, hoverRules.join(" | "));
+  ok("no :hover rule contains transform",
+     !hoverRules.some(function (r) { return /transform/.test(r); }), hoverRules.join(" | "));
+  ok("hover is scoped to interactive tiles only",
+     hoverRules.every(function (r) { return r.indexOf(".interactive") !== -1; }), hoverRules.join(" | "));
+  var tileRule = (cssText.match(/\.entity-tile\s*\{[^}]*\}/) || [""])[0];
+  ok("tile transitions no layout-affecting property",
+     !/transition:[^;]*(transform|margin|padding|width|height|top|left)/.test(tileRule),
+     (tileRule.match(/transition:[^;]*/) || ["none"])[0]);
+  ok("chevron transform is rotate-only and not hover-driven",
+     /\.collapsed \.collapse-icon\s*\{[^}]*rotate/.test(cssText) && !/:hover[^{]*\{[^}]*transform/.test(cssText));
+  eq("no transform applied to a tile", getComputedStyle(themedTile).transform, "none");
+
+  // Apply the hover declarations directly and confirm geometry is unchanged.
+  var hoverBody = (cssText.match(/\.entity-tile\.interactive:hover\s*\{([^}]*)\}/) || [null, ""])[1];
+  var geoBefore = themedTile.getBoundingClientRect();
+  var probeStyle = document.createElement("style");
+  probeStyle.textContent = ".entity-tile{" + hoverBody + "}";
+  themedCard.shadowRoot.appendChild(probeStyle);
+  var geoAfter = themedTile.getBoundingClientRect();
+  eq("hover declarations do not shift the tile top", geoBefore.top, geoAfter.top);
+  eq("hover declarations do not change the tile height", geoBefore.height, geoAfter.height);
+  probeStyle.remove();
+
+  /* ================================================================== *
+   * 6. no DOM churn on unrelated state updates
+   * ================================================================== */
+  section("6. No DOM churn on unrelated updates");
+  var tileBefore = tiles()[0];
+  var headerBefore = sr.querySelector(".card-header");
+  hass.states["sensor.noise"] = mk("sensor.noise", "43", {});
+  card.hass = { states: Object.assign({}, hass.states) };
+  ok("unrelated state change does not rebuild tiles", tiles()[0] === tileBefore);
+  ok("unrelated state change does not rebuild the header", sr.querySelector(".card-header") === headerBefore);
+  eq("tile count unchanged", tiles().length, 5);
+
+  hass.states["light.living_room"] = mk("light.living_room", "unavailable", { friendly_name: "Living Room" });
+  card.hass = { states: Object.assign({}, hass.states) };
+  eq("a newly unavailable entity appears", tiles().length, 6);
+  eq("count badge updated", sr.querySelector(".entity-count").textContent, "6");
+  ok("header element survives a content update", sr.querySelector(".card-header") === headerBefore);
+
+  /* ================================================================== *
+   * 7. more-info
+   * ================================================================== */
+  section("7. more-info dialog");
+  var fired = [];
+  window.addEventListener("hass-more-info", function (e) { fired.push(e); });
+  var kitchenTile = tileFor("sensor.kitchen");
+  kitchenTile.click();
+  eq("click fires hass-more-info once", fired.length, 1);
+  eq("event carries the entity id", fired[0].detail.entityId, "sensor.kitchen");
+  ok("event escapes the shadow DOM", fired[0].composed === true && fired[0].bubbles === true);
+  fired = [];
+  tiles().filter(function (t) { return !t.hasAttribute("data-entity"); })[0].click();
+  eq("missing tile does not fire more-info", fired.length, 0);
+  fired = [];
+  kitchenTile.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, composed: true }));
+  eq("Enter fires more-info", fired.length, 1);
+  fired = [];
+  kitchenTile.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true, composed: true }));
+  eq("Space fires more-info", fired.length, 1);
+  fired = [];
+  kitchenTile.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, composed: true }));
+  eq("Tab does not fire more-info", fired.length, 0);
+
+  /* ================================================================== *
+   * 8. collapse / expand
+   * ================================================================== */
+  section("8. Collapse and expand");
+  fired = [];
+  var haCardEl = sr.querySelector("ha-card");
+  sr.querySelector(".card-header").click();
+  eq("collapsed class set", haCardEl.classList.contains("collapsed"), true);
+  eq("body emptied when collapsed", sr.querySelectorAll(".entity-tile").length, 0);
+  eq("aria-expanded false", sr.querySelector(".card-header").getAttribute("aria-expanded"), "false");
+  eq("header element not replaced on toggle", sr.querySelector(".card-header") === headerBefore, true);
+  eq("chevron rotated by CSS", getComputedStyle(sr.querySelector(".collapse-icon")).transform !== "none", true);
+  eq("collapsed getCardSize", card.getCardSize(), 1);
+  eq("header click does not fire more-info", fired.length, 0);
+  eq("count badge still shown while collapsed", sr.querySelector(".entity-count").textContent, "6");
+  sr.querySelector(".card-header").click();
+  eq("expands again", sr.querySelectorAll(".entity-tile").length, 6);
+  eq("ha-card element reused across toggles", sr.querySelector("ha-card") === haCardEl, true);
+
+  var collapsedCard = make({ type: "custom:unavailable-entity-card", expanded: false, entities: ["sensor.kitchen"] });
+  eq("expanded:false starts collapsed",
+     collapsedCard.shadowRoot.querySelector("ha-card").classList.contains("collapsed"), true);
+  eq("collapsed card still counts entities",
+     collapsedCard.shadowRoot.querySelector(".entity-count").textContent, "1");
+
+  /* ================================================================== *
+   * 9. show_header: false
+   * ================================================================== */
+  section("9. show_header: false");
+  var noHeader = make({ type: "custom:unavailable-entity-card", show_header: false, entities: ["sensor.kitchen"] });
+  eq("no header rendered", noHeader.shadowRoot.querySelector(".card-header"), null);
+  eq("tiles still rendered", noHeader.shadowRoot.querySelectorAll(".entity-tile").length, 1);
+  noHeader.shadowRoot.querySelector(".entity-tile").click();
+  ok("clicking a tile without a header does not throw", true);
+
+  /* ================================================================== *
+   * 10. escaping
+   * ================================================================== */
+  section("10. Escaping");
+  var xssTitle = '<img src=x onerror="window.__t=1">';
+  var xssName = '<img src=x onerror="window.__n=1">';
+  var xss = make({
+    type: "custom:unavailable-entity-card",
+    title: xssTitle,
+    entities: [{ entity: "sensor.kitchen", name: xssName }]
+  });
+  eq("title not parsed as HTML", xss.shadowRoot.querySelectorAll("img").length, 0);
+  eq("title rendered as text", xss.shadowRoot.querySelector(".header-title").textContent, xssTitle);
+  eq("name escaped", xss.shadowRoot.querySelector(".entity-name").textContent, xssName);
+  eq("no injected script ran", window.__t === undefined && window.__n === undefined, true);
+
+  /* ================================================================== *
+   * 11. config validation
+   * ================================================================== */
+  section("11. Config validation");
+  var throws = function (cfg) {
+    try { document.createElement("unavailable-entity-card").setConfig(cfg); return false; }
+    catch (e) { return true; }
+  };
+  eq("missing entities throws", throws({ type: "x" }), true);
+  eq("empty entities throws", throws({ type: "x", entities: [] }), true);
+  eq("entry without an entity key throws", throws({ type: "x", entities: [{ name: "n" }] }), true);
+  eq("blank entity string throws", throws({ type: "x", entities: ["   "] }), true);
+  eq("null entry dropped when a valid one remains",
+     throws({ type: "x", entities: [null, "sensor.kitchen"] }), false);
+  eq("string unavailable_states accepted",
+     throws({ type: "x", entities: ["sensor.kitchen"], unavailable_states: "offline" }), false);
+  eq("object unavailable_states accepted",
+     throws({ type: "x", entities: ["sensor.kitchen"], unavailable_states: { offline: "#fff59d" } }), false);
+
+  var proto = make({ type: "x", entities: ["sensor.proto"], unavailable_states: ["constructor"] }, false);
+  proto.hass = { states: { "sensor.proto": mk("sensor.proto", "constructor", {}) } };
+  eq("a state named 'constructor' gets no style from Object.prototype",
+     proto.shadowRoot.querySelector(".entity-state").getAttribute("style"), null);
+
+  /* ================================================================== *
+   * 12. reconfiguration (dashboard editor)
+   * ================================================================== */
+  section("12. Reconfiguration");
+  card.setConfig({ type: "custom:unavailable-entity-card", title: "Renamed", entities: ["sensor.kitchen"] });
+  card.hass = hass;
+  eq("title updated", card.shadowRoot.querySelector(".header-title").textContent, "Renamed");
+  eq("entities re-filtered", card.shadowRoot.querySelectorAll(".entity-tile").length, 1);
+  eq("exactly one ha-card in the shadow root", card.shadowRoot.querySelectorAll("ha-card").length, 1);
+  eq("exactly one stylesheet source",
+     (card.shadowRoot.adoptedStyleSheets || []).length + card.shadowRoot.querySelectorAll("style").length, 1);
+  fired = [];
+  card.shadowRoot.querySelector(".entity-tile").click();
+  eq("listeners not duplicated after reconfig", fired.length, 1);
+  ok("hass set before setConfig is safe", (function () {
+    try {
+      var c = document.createElement("unavailable-entity-card");
+      c.hass = hass;
+      c.setConfig({ type: "x", entities: ["sensor.kitchen"] });
+      sandbox.appendChild(c);
+      c.hass = hass;
+      return c.shadowRoot.querySelectorAll(".entity-tile").length === 1;
+    } catch (e) { return false; }
+  })());
+
+  /* ================================================================== *
+   * 13. style values containing legitimate semicolons
+   * ================================================================== */
+  section("13. Legitimate semicolons in style values");
+  var dataUri = 'url("data:image/svg+xml;base64,PHN2Zy8+")';
+  var styled = make({
+    type: "custom:unavailable-entity-card",
+    entities: ["sensor.kitchen", "binary_sensor.garage", "sensor.ups"],
+    unavailable_states: [
+      { state: "unavailable", background: dataUri },
+      { state: "unknown", background: "linear-gradient(to right, rgba(255,0,0,.2), rgba(0,0,255,.2))" },
+      { state: "offline", background: "red; position:fixed; top:0", color: "#827717" }
+    ]
+  });
+  var badgeFor = function (id) {
+    return [].slice.call(styled.shadowRoot.querySelectorAll(".entity-tile"))
+      .filter(function (t) { return t.getAttribute("data-entity") === id; })[0]
+      .querySelector(".entity-state");
+  };
+  eq("semicolon inside quotes preserved (data uri)",
+     badgeFor("sensor.kitchen").style.backgroundImage.indexOf("svg+xml;base64") !== -1, true);
+  eq("commas inside parens preserved (gradient)",
+     badgeFor("binary_sensor.garage").style.backgroundImage.indexOf("linear-gradient") !== -1, true);
+  eq("top-level semicolon still cuts", badgeFor("sensor.ups").style.backgroundColor, "red");
+  eq("injected property still blocked", badgeFor("sensor.ups").style.position, "");
+  eq("color alongside a cut background is kept", badgeFor("sensor.ups").style.color, "rgb(130, 119, 23)");
+
+  /* ================================================================== *
+   * 14. entity id whitespace
+   * ================================================================== */
+  section("14. Entity id whitespace");
+  var ws = make({
+    type: "custom:unavailable-entity-card",
+    entities: ["  sensor.kitchen  ", { entity: "  binary_sensor.garage  ", name: "Padded object form" }]
+  });
+  var wsTiles = [].slice.call(ws.shadowRoot.querySelectorAll(".entity-tile"));
+  eq("both padded entities resolved", wsTiles.length, 2);
+  eq("string form trimmed and matched",
+     wsTiles.some(function (t) { return t.getAttribute("data-entity") === "sensor.kitchen"; }), true);
+  eq("object form trimmed and matched",
+     wsTiles.some(function (t) { return t.getAttribute("data-entity") === "binary_sensor.garage"; }), true);
+  eq("neither reported as missing", ws.shadowRoot.textContent.indexOf("not available") !== -1, false);
+  eq("object form keeps its other keys", ws.shadowRoot.textContent.indexOf("Padded object form") !== -1, true);
+
+  /* ================================================================== *
+   * 15. output hygiene
+   * ================================================================== */
+  section("15. Output hygiene");
+  var rendered = card.shadowRoot.innerHTML + styled.shadowRoot.innerHTML + ws.shadowRoot.innerHTML;
+  eq("rendered markup contains no control characters",
+     /[\x00-\x08\x0b-\x1f\x7f]/.test(rendered), false);
+  eq("card source file exposes no globals beyond customCards",
+     typeof window.UnavailableEntityCard, "undefined");
+
+  /* ------------------------------------------------------------------ *
+   * report
+   * ------------------------------------------------------------------ */
+  var failed = results.filter(function (r) { return !r.pass; });
+  window.__results = { total: results.length, failed: failed.length, failures: failed, all: results };
+
+  var score = document.getElementById("score");
+  score.textContent = (results.length - failed.length) + " / " + results.length + " passed";
+  score.className = failed.length ? "bad" : "ok";
+  document.getElementById("score-label").textContent =
+    failed.length ? failed.length + " failing" : "all green";
+
+  var out = document.getElementById("results");
+  var groups = [];
+  results.forEach(function (r) {
+    var g = groups.filter(function (x) { return x.name === r.group; })[0];
+    if (!g) { g = { name: r.group, rows: [] }; groups.push(g); }
+    g.rows.push(r);
+  });
+  groups.forEach(function (g) {
+    var wrap = document.createElement("div");
+    wrap.className = "group" + (g.rows.every(function (r) { return r.pass; }) ? " all-pass" : "");
+    var h = document.createElement("h3");
+    h.textContent = g.name;
+    wrap.appendChild(h);
+    g.rows.forEach(function (r) {
+      var row = document.createElement("div");
+      row.className = "row " + (r.pass ? "pass" : "fail");
+      var tag = document.createElement("span");
+      tag.className = "tag";
+      tag.textContent = r.pass ? "PASS" : "FAIL";
+      var body = document.createElement("span");
+      body.textContent = r.name;
+      if (!r.pass && r.detail) {
+        var d = document.createElement("span");
+        d.className = "detail";
+        d.textContent = r.detail;
+        body.appendChild(d);
+      }
+      row.appendChild(tag);
+      row.appendChild(body);
+      wrap.appendChild(row);
+    });
+    out.appendChild(wrap);
+  });
+
+  document.getElementById("only-fails").addEventListener("change", function (e) {
+    document.body.classList.toggle("only-fails", e.target.checked);
+  });
+
+  /* ------------------------------------------------------------------ *
+   * visual previews
+   * ------------------------------------------------------------------ */
+  var visualHass = { states: {
+    "sensor.living_room_temperature": mk("sensor.living_room_temperature", "unavailable",
+      { friendly_name: "Living Room Temperature", icon: "mdi:thermometer" }),
+    "binary_sensor.garage_door": mk("binary_sensor.garage_door", "unknown", { friendly_name: "Garage Door" }),
+    "sensor.ups_status": mk("sensor.ups_status", "offline", { friendly_name: "UPS Status" }),
+    "light.kitchen": mk("light.kitchen", "on", { friendly_name: "Kitchen" })
+  } };
+  var visualConfigs = [
+    {
+      title: "Critical sensors",
+      entities: [
+        "sensor.living_room_temperature",
+        { entity: "binary_sensor.garage_door", name: "Garage Door", icon: "mdi:garage" },
+        "sensor.ups_status",
+        "sensor.ghost_device"
+      ],
+      unavailable_states: [{ state: "offline", background: "#f0f4c3", color: "#827717" }]
+    },
+    { title: "Collapsed by default", expanded: false, entities: ["sensor.living_room_temperature", "binary_sensor.garage_door"] },
+    { title: "Nothing wrong", entities: ["light.kitchen"] }
+  ];
+  ["visual-light", "visual-dark"].forEach(function (id) {
+    var pane = document.getElementById(id);
+    visualConfigs.forEach(function (cfg) {
+      var el = document.createElement("unavailable-entity-card");
+      el.setConfig(Object.assign({ type: "custom:unavailable-entity-card" }, cfg));
+      pane.appendChild(el);
+      el.hass = visualHass;
+    });
+  });
+
+  /* ------------------------------------------------------------------ *
+   * live hover-bounce meters
+   * ------------------------------------------------------------------ */
+  [["old", "meter-old"], ["new", "meter-new"]].forEach(function (pair) {
+    var probe = document.querySelector('.probe[data-probe="' + pair[0] + '"]');
+    var meter = document.getElementById(pair[1]);
+    var stats = { enter: 0, leave: 0, tops: {} };
+    var paint = function () {
+      var flips = Object.keys(stats.tops).length;
+      var bad = stats.leave > 0 || flips > 1;
+      meter.innerHTML =
+        "mouseenter <b>" + stats.enter + "</b> &nbsp; mouseleave <b>" + stats.leave + "</b> &nbsp; " +
+        "distinct offsets <b>" + flips + "</b> &nbsp; " +
+        '<span class="' + (bad ? "warn" : "good") + '">' +
+        (bad ? "unstable — hover is oscillating" : "stable") + "</span>";
+    };
+    var record = function () {
+      stats.tops[Math.round(probe.getBoundingClientRect().top * 100) / 100] = 1;
+      paint();
+    };
+    probe.addEventListener("mouseenter", function () { stats.enter++; record(); });
+    probe.addEventListener("mouseleave", function () { stats.leave++; record(); });
+    probe.addEventListener("mousemove", record);
+    probe.addEventListener("transitionrun", record);
+    probe.addEventListener("transitionend", record);
+    paint();
+  });
+})();
+</script>
+</body>
+</html>
