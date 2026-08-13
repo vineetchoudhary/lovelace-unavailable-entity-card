@@ -1,54 +1,356 @@
 const CARD_TYPE = "custom:unavailable-entity-card";
 const ELEMENT_TAG = "unavailable-entity-card";
+const DEFAULT_TITLE = "Unavailable entities";
 const DEFAULT_ICON = "mdi:alert-circle-outline";
 const MISSING_ICON = "mdi:help-circle-outline";
+const MISSING_STATE = "not available";
 const DEFAULT_UNAVAILABLE_STATES = new Set(["unavailable", "unknown"]);
+
+const HTML_ESCAPES = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&#39;",
+  "`": "&#96;"
+};
+const HTML_ESCAPE_PATTERN = /[&<>"'`]/g;
+
+const escapeHtml = (value) =>
+  String(value ?? "").replace(HTML_ESCAPE_PATTERN, (char) => HTML_ESCAPES[char]);
+
+const sanitizeStyleValue = (value) => {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  let depth = 0;
+  let quote = "";
+  let end = value.length;
+
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+
+    if (quote) {
+      if (char === quote && value[index - 1] !== "\\") {
+        quote = "";
+      }
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      quote = char;
+    } else if (char === "(") {
+      depth += 1;
+    } else if (char === ")") {
+      depth = Math.max(0, depth - 1);
+    } else if (depth === 0 && (char === ";" || char === "{" || char === "}")) {
+      end = index;
+      break;
+    }
+  }
+
+  const cleaned = value.slice(0, end).trim();
+  return cleaned || undefined;
+};
+
+const CARD_STYLES = `
+  :host {
+    display: block;
+  }
+
+  ha-card {
+    padding: 0 8px 8px;
+    box-sizing: border-box;
+    background: var(--ha-card-background, var(--card-background-color));
+  }
+
+  ha-card.collapsed {
+    padding-bottom: 0;
+  }
+
+  .card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 8px;
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--primary-text-color);
+    cursor: pointer;
+    user-select: none;
+    border-radius: var(--ha-card-border-radius, 12px);
+  }
+
+  .card-header:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: -2px;
+  }
+
+  .header-content {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .header-title {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .entity-count {
+    background: rgba(var(--rgb-primary-color, 0, 154, 199), 0.12);
+    color: var(--primary-color);
+    font-size: 0.8rem;
+    padding: 2px 8px;
+    border-radius: 999px;
+  }
+
+  .entity-count[hidden] {
+    display: none;
+  }
+
+  .collapse-icon {
+    color: var(--secondary-text-color);
+    transition: transform 180ms ease;
+  }
+
+  ha-card.collapsed .collapse-icon {
+    transform: rotate(-90deg);
+  }
+
+  .card-body {
+    display: grid;
+  }
+
+  .entity-list {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: 1fr;
+    margin: 8px 0 0;
+  }
+
+  .entity-tile {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 16px;
+    border-radius: var(--ha-card-border-radius, 12px);
+    background: var(--tile-background, rgba(var(--rgb-primary-text-color, 33, 33, 33), 0.06));
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+    border: 1px solid rgba(var(--rgb-primary-text-color, 33, 33, 33), 0.08);
+    transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+  }
+
+  .entity-tile.interactive {
+    cursor: pointer;
+  }
+
+  .entity-tile.interactive:hover {
+    background: var(--tile-background-hover, rgba(var(--rgb-primary-text-color, 33, 33, 33), 0.1));
+    border-color: rgba(var(--rgb-primary-text-color, 33, 33, 33), 0.16);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  }
+
+  .entity-tile.interactive:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+  }
+
+  .entity-visual {
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    display: grid;
+    place-items: center;
+    background: var(--tile-icon-background, rgba(var(--rgb-primary-color, 0, 154, 199), 0.12));
+    color: var(--tile-icon-color, var(--primary-color));
+    overflow: hidden;
+  }
+
+  .entity-visual img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .entity-meta {
+    overflow: hidden;
+  }
+
+  .entity-name {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--primary-text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .entity-id {
+    margin: 2px 0 0;
+    font-size: 0.8rem;
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .entity-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 600;
+    background: rgba(var(--rgb-warning-color, 255, 166, 0), 0.15);
+    color: var(--warning-color);
+  }
+
+  .entity-state.missing {
+    background: rgba(var(--rgb-disabled-color, 189, 189, 189), 0.25);
+    color: var(--secondary-text-color);
+  }
+
+  .empty-state {
+    display: grid;
+    place-items: center;
+    padding: 32px 16px;
+    margin: 8px 0 0;
+    border-radius: var(--ha-card-border-radius, 12px);
+    background: rgba(var(--rgb-primary-text-color, 33, 33, 33), 0.06);
+    color: var(--secondary-text-color);
+    text-align: center;
+  }
+
+  .empty-state strong {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 1rem;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .entity-tile,
+    .collapse-icon {
+      transition: none;
+    }
+  }
+`;
+
+const supportsAdoptedStyleSheets =
+  typeof CSSStyleSheet === "function" &&
+  "replaceSync" in CSSStyleSheet.prototype &&
+  typeof ShadowRoot === "function" &&
+  "adoptedStyleSheets" in ShadowRoot.prototype;
+
+let sharedStyleSheet;
+
+const applyStyles = (root) => {
+  if (supportsAdoptedStyleSheets) {
+    if (!sharedStyleSheet) {
+      sharedStyleSheet = new CSSStyleSheet();
+      sharedStyleSheet.replaceSync(CARD_STYLES);
+    }
+    root.adoptedStyleSheets = [sharedStyleSheet];
+    return;
+  }
+
+  const style = document.createElement("style");
+  style.textContent = CARD_STYLES;
+  root.append(style);
+};
 
 class UnavailableEntityCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
+    applyStyles(this.shadowRoot);
+
     this._config = undefined;
     this._hass = undefined;
     this._entities = [];
     this._collapsed = false;
     this._unavailableStates = DEFAULT_UNAVAILABLE_STATES;
-    this._stateColors = {};
+    this._stateColors = new Map();
+    this._signature = undefined;
+    this._card = undefined;
+    this._header = undefined;
+    this._titleElement = undefined;
+    this._countElement = undefined;
+    this._body = undefined;
+
+    this._handleClick = this._handleClick.bind(this);
+    this._handleKeydown = this._handleKeydown.bind(this);
   }
 
-  static getStubConfig() {
+  static getStubConfig(hass, entities, entitiesFallback) {
+    const states = hass && hass.states ? hass.states : {};
+    const pool =
+      [entities, entitiesFallback, Object.keys(states)].find(
+        (list) => Array.isArray(list) && list.length > 0
+      ) || [];
+
+    const offline = pool.filter((entityId) => {
+      const state = states[entityId];
+      return !!state && DEFAULT_UNAVAILABLE_STATES.has(state.state);
+    });
+
+    const picked = (offline.length > 0 ? offline : pool).slice(0, 3);
+
     return {
       type: CARD_TYPE,
-      title: "Unavailable Entities",
-      entities: ["light.living_room", "sensor.kitchen_temperature"]
+      title: DEFAULT_TITLE,
+      entities: picked.length > 0 ? picked : ["sun.sun"]
     };
   }
 
   setConfig(config) {
-    if (!config || !Array.isArray(config.entities) || config.entities.length === 0) {
+    if (!config || !Array.isArray(config.entities)) {
       throw new Error("You need to define entities");
     }
 
-    this._config = {
-      ...config,
-      entities: config.entities.map((entry) => (typeof entry === "string" ? { entity: entry } : entry))
-    };
+    const entities = config.entities
+      .map((entry) => {
+        if (typeof entry === "string") {
+          return { entity: entry.trim() };
+        }
+        if (entry && typeof entry.entity === "string") {
+          return { ...entry, entity: entry.entity.trim() };
+        }
+        return entry;
+      })
+      .filter((entry) => entry && typeof entry.entity === "string" && entry.entity !== "");
 
-    // expanded defaults to true, so collapsed is the inverse
-    const expanded = config.expanded !== undefined ? config.expanded : true;
-    this._collapsed = !expanded;
+    if (entities.length === 0) {
+      throw new Error("You need to define entities");
+    }
+
+    this._config = { ...config, entities };
+    this._collapsed = config.expanded === undefined ? false : !config.expanded;
+
     const unavailableConfig = this._buildUnavailableConfig(config.unavailable_states);
     this._unavailableStates = unavailableConfig.states;
     this._stateColors = unavailableConfig.colors;
     this._entities = this._calculateEntities();
-    this._render();
+
+    this._teardown();
+    this._render(true);
   }
 
   set hass(hass) {
     this._hass = hass;
-    const unavailableConfig = this._buildUnavailableConfig(this._config?.unavailable_states);
-    this._unavailableStates = unavailableConfig.states;
-    this._stateColors = unavailableConfig.colors;
+    if (!this._config) {
+      return;
+    }
     this._entities = this._calculateEntities();
     this._render();
   }
@@ -66,6 +368,15 @@ class UnavailableEntityCard extends HTMLElement {
     return Math.max(1, headerRows + entityRows);
   }
 
+  getGridOptions() {
+    return {
+      columns: "full",
+      rows: "auto",
+      min_columns: 6,
+      min_rows: 1
+    };
+  }
+
   _calculateEntities() {
     if (!this._config || !this._hass || !this._hass.states) {
       return [];
@@ -80,7 +391,7 @@ class UnavailableEntityCard extends HTMLElement {
         output.push({
           id: entry.entity,
           name: entry.name || entry.entity,
-          state: "not available",
+          state: MISSING_STATE,
           icon: entry.icon,
           picture: undefined,
           missing: true
@@ -112,7 +423,7 @@ class UnavailableEntityCard extends HTMLElement {
 
   _buildUnavailableConfig(customStates) {
     const states = new Set(DEFAULT_UNAVAILABLE_STATES);
-    const colors = {};
+    const colors = new Map();
 
     const registerState = (stateKey, styleSource) => {
       const state = typeof stateKey === "string" ? stateKey.trim() : "";
@@ -120,7 +431,10 @@ class UnavailableEntityCard extends HTMLElement {
         return;
       }
       states.add(state);
-      this._setStateStyle(colors, state, styleSource);
+      const style = this._normalizeStateStyle(styleSource);
+      if (style) {
+        colors.set(state, style);
+      }
     };
 
     const collectStates = (stateField) => {
@@ -188,28 +502,19 @@ class UnavailableEntityCard extends HTMLElement {
     return { states, colors };
   }
 
-  _setStateStyle(target, stateKey, styleSource) {
-    const style = this._normalizeStateStyle(styleSource);
-    if (!style) {
-      return;
-    }
-    target[stateKey] = style;
-  }
-
   _normalizeStateStyle(styleSource) {
     if (typeof styleSource === "string") {
-      const backgroundOnly = styleSource.trim();
-      return backgroundOnly ? { background: backgroundOnly } : undefined;
+      const background = sanitizeStyleValue(styleSource);
+      return background ? { background } : undefined;
     }
 
     if (!styleSource || typeof styleSource !== "object") {
       return undefined;
     }
 
-    const valueAlias = typeof styleSource.value === "string" ? styleSource.value.trim() : undefined;
-    const background = typeof styleSource.background === "string" ? styleSource.background.trim() : valueAlias;
-    const color = typeof styleSource.color === "string" ? styleSource.color.trim() : undefined;
-    const border = typeof styleSource.border === "string" ? styleSource.border.trim() : undefined;
+    const background = sanitizeStyleValue(styleSource.background) || sanitizeStyleValue(styleSource.value);
+    const color = sanitizeStyleValue(styleSource.color);
+    const border = sanitizeStyleValue(styleSource.border);
 
     const normalized = {};
     if (background) {
@@ -226,100 +531,159 @@ class UnavailableEntityCard extends HTMLElement {
   }
 
   _getStateStyle(state) {
-    if (!state) {
-      return "";
-    }
-
-    const config = this._stateColors[state];
-    if (!config) {
-      return "";
-    }
-
-    return this._formatStateStyle(config);
-  }
-
-  _formatStateStyle(config) {
+    const config = state ? this._stateColors.get(state) : undefined;
     if (!config) {
       return "";
     }
 
     const styles = [];
     if (config.background) {
-      styles.push(`background:${this._escapeAttribute(config.background)}`);
+      styles.push(`background:${escapeHtml(config.background)}`);
     }
     if (config.color) {
-      styles.push(`color:${this._escapeAttribute(config.color)}`);
+      styles.push(`color:${escapeHtml(config.color)}`);
     }
     if (config.border) {
-      styles.push(`border:${this._escapeAttribute(config.border)}`);
+      styles.push(`border:${escapeHtml(config.border)}`);
     }
 
     return styles.join("; ");
   }
 
-  _render() {
+  _buildSignature() {
+    return JSON.stringify([
+      this._collapsed,
+      this._config.show_header !== false,
+      this._config.title ?? DEFAULT_TITLE,
+      this._entities.map((entity) => [
+        entity.id,
+        entity.name,
+        entity.state,
+        entity.icon || "",
+        entity.picture || "",
+        entity.missing
+      ])
+    ]);
+  }
+
+  _teardown() {
+    if (this._card) {
+      this._card.removeEventListener("click", this._handleClick);
+      this._card.removeEventListener("keydown", this._handleKeydown);
+      this._card.remove();
+    }
+    this._card = undefined;
+    this._header = undefined;
+    this._titleElement = undefined;
+    this._countElement = undefined;
+    this._body = undefined;
+    this._signature = undefined;
+  }
+
+  _render(force) {
     if (!this.shadowRoot || !this._config) {
       return;
     }
 
-    const style = this._buildStyle();
-    const header = this._renderHeader();
-    const body = this._collapsed
-      ? ""
-      : this._entities.length > 0
-        ? this._renderEntities()
-        : this._renderEmptyState();
+    const signature = this._buildSignature();
+    if (!force && signature === this._signature) {
+      return;
+    }
+    this._signature = signature;
 
-    const card = document.createElement("ha-card");
-    card.innerHTML = `${header}${body}`;
-
-    this.shadowRoot.innerHTML = "";
-    this.shadowRoot.append(style, card);
-
-    card.classList.toggle("collapsed", this._collapsed);
-
-    if (!this._collapsed) {
-      this._attachTileHandlers(card);
+    if (!this._card) {
+      this._buildSkeleton();
     }
 
-    this._attachHeaderHandler(card);
+    this._card.classList.toggle("collapsed", this._collapsed);
+    this._updateHeader();
+    this._updateBody();
   }
 
-  _renderHeader() {
-    if (this._config.show_header === false) {
-      return "";
+  _buildSkeleton() {
+    const card = document.createElement("ha-card");
+
+    if (this._config.show_header !== false) {
+      const header = document.createElement("div");
+      header.className = "card-header";
+      header.setAttribute("role", "button");
+      header.tabIndex = 0;
+      header.innerHTML = `
+        <div class="header-content">
+          <span class="header-title"></span>
+          <span class="entity-count" hidden></span>
+        </div>
+        <ha-icon class="collapse-icon" icon="mdi:chevron-down"></ha-icon>
+      `;
+      card.append(header);
+      this._header = header;
+      this._titleElement = header.querySelector(".header-title");
+      this._countElement = header.querySelector(".entity-count");
     }
 
-    const heading = this._escapeHtml(this._config.title ?? "Unavailable entities");
-    const count = this._entities.length;
-    const countMarkup = count ? `<span class="entity-count">${count}</span>` : "";
-    const icon = this._collapsed ? "mdi:chevron-right" : "mdi:chevron-down";
+    const body = document.createElement("div");
+    body.className = "card-body";
+    card.append(body);
+    this._body = body;
 
-    return `
-      <div class="card-header" role="button" tabindex="0" data-action="toggle" aria-expanded="${this._collapsed ? "false" : "true"}">
-        <div class="header-content">
-          <span class="header-title">${heading}</span>
-          ${countMarkup}
-        </div>
-        <ha-icon class="collapse-icon" icon="${icon}"></ha-icon>
-      </div>
-    `;
+    card.addEventListener("click", this._handleClick);
+    card.addEventListener("keydown", this._handleKeydown);
+
+    this.shadowRoot.append(card);
+    this._card = card;
+  }
+
+  _updateHeader() {
+    if (!this._header) {
+      return;
+    }
+
+    const title = String(this._config.title ?? DEFAULT_TITLE);
+    if (this._titleElement.textContent !== title) {
+      this._titleElement.textContent = title;
+    }
+
+    const count = this._entities.length;
+    const countText = count > 0 ? String(count) : "";
+    if (this._countElement.textContent !== countText) {
+      this._countElement.textContent = countText;
+    }
+    this._countElement.hidden = count === 0;
+
+    this._header.setAttribute("aria-expanded", this._collapsed ? "false" : "true");
+  }
+
+  _updateBody() {
+    if (this._collapsed) {
+      if (this._body.firstChild) {
+        this._body.textContent = "";
+      }
+      return;
+    }
+
+    this._body.innerHTML =
+      this._entities.length > 0 ? this._renderEntities() : this._renderEmptyState();
   }
 
   _renderEntities() {
     const items = this._entities
       .map((entity) => {
-        const stateClass = entity.missing ? "entity-state missing" : "entity-state";
         const stateStyle = this._getStateStyle(entity.state);
         const styleAttribute = stateStyle ? ` style="${stateStyle}"` : "";
+        const stateClass = entity.missing ? "entity-state missing" : "entity-state";
+        const tileClass = entity.missing ? "entity-tile" : "entity-tile interactive";
+        const interactiveAttributes = entity.missing
+          ? ""
+          : ` tabindex="0" data-entity="${escapeHtml(entity.id)}"`;
+
         return `
-          <div class="entity-tile" role="listitem" data-entity="${this._escapeAttribute(entity.id)}" data-missing="${entity.missing ? "true" : "false"}">
+          <div class="${tileClass}" role="listitem"${interactiveAttributes}>
             ${this._renderEntityVisual(entity)}
             <div class="entity-meta">
-              <p class="entity-name">${this._escapeHtml(entity.name)}</p>
-              <p class="entity-id">${this._escapeHtml(entity.id)}</p>
+              <p class="entity-name">${escapeHtml(entity.name)}</p>
+              <p class="entity-id">${escapeHtml(entity.id)}</p>
             </div>
-            <span class="${stateClass}"${styleAttribute}>${this._escapeHtml(entity.state)}</span>
+            <span class="${stateClass}"${styleAttribute}>${escapeHtml(entity.state)}</span>
           </div>
         `;
       })
@@ -336,13 +700,13 @@ class UnavailableEntityCard extends HTMLElement {
     if (entity.picture) {
       return `
         <div class="entity-visual">
-          <img src="${this._escapeAttribute(entity.picture)}" alt="${this._escapeAttribute(entity.name)}" />
+          <img src="${escapeHtml(entity.picture)}" alt="${escapeHtml(entity.name)}" />
         </div>
       `;
     }
 
     const fallbackIcon = entity.missing ? MISSING_ICON : DEFAULT_ICON;
-    const icon = this._escapeAttribute(entity.icon || fallbackIcon);
+    const icon = escapeHtml(entity.icon || fallbackIcon);
     return `
       <div class="entity-visual" aria-hidden="true">
         <ha-icon icon="${icon}"></ha-icon>
@@ -359,253 +723,63 @@ class UnavailableEntityCard extends HTMLElement {
     `;
   }
 
-  _buildStyle() {
-    const style = document.createElement("style");
-    style.textContent = `
-      :host {
-        display: block;
-      }
-
-      ha-card {
-        padding-top: 0px;
-        padding-right: 8px;
-        padding-bottom: 8px;
-        padding-left: 8px;
-        box-sizing: border-box;
-        background: var(--ha-card-background, var(--card-background-color));
-      }
-
-      ha-card.collapsed {
-        padding-bottom: 0px;
-      }
-
-      .card-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 12px 8px;
-        margin: 0;
-        font-size: 1.1rem;
-        font-weight: 600;
-        color: var(--primary-text-color);
-        cursor: pointer;
-        user-select: none;
-        border-radius: var(--ha-card-border-radius, 12px);
-      }
-
-      .card-header:focus-visible {
-        outline: none;
-        box-shadow: 0 0 0 2px rgba(var(--rgb-primary-color), 0.6);
-      }
-
-      .header-content {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        min-width: 0;
-      }
-
-      .header-title {
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-
-      .entity-count {
-        background: rgba(var(--rgb-primary-color), 0.12);
-        color: var(--primary-color);
-        font-size: 0.8rem;
-        padding: 2px 8px;
-        border-radius: 999px;
-      }
-
-      .collapse-icon {
-        color: var(--secondary-text-color);
-        transition: transform 120ms ease;
-      }
-
-      .entity-list {
-        display: grid;
-        gap: 12px;
-        grid-template-columns: 1fr;
-        margin: 8px 0 0;
-      }
-
-      .entity-tile {
-        display: grid;
-        grid-template-columns: auto 1fr auto;
-        align-items: center;
-        gap: 14px;
-        padding: 14px 16px;
-        border-radius: var(--ha-card-border-radius, 12px);
-        background: var(--tile-background, rgba(var(--rgb-secondary-background-color), 0.4));
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
-        border: 1px solid rgba(var(--rgb-primary-text-color), 0.05);
-        transition: transform 120ms ease, box-shadow 120ms ease;
-        outline: none;
-      }
-
-      .entity-tile:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
-      }
-
-      .entity-tile.interactive {
-        cursor: pointer;
-      }
-
-      .entity-tile.interactive:focus-visible {
-        box-shadow: 0 0 0 2px rgba(var(--rgb-primary-color), 0.6);
-      }
-
-      .entity-visual {
-        width: 40px;
-        height: 40px;
-        border-radius: 12px;
-        display: grid;
-        place-items: center;
-        background: var(--tile-icon-background, rgba(var(--rgb-primary-color), 0.12));
-        color: var(--tile-icon-color, var(--primary-color));
-        overflow: hidden;
-      }
-
-      .entity-visual img {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-      }
-
-      .entity-meta {
-        overflow: hidden;
-      }
-
-      .entity-name {
-        margin: 0;
-        font-size: 0.95rem;
-        font-weight: 600;
-        color: var(--primary-text-color);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-
-      .entity-id {
-        margin: 2px 0 0;
-        font-size: 0.8rem;
-        color: var(--secondary-text-color);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-
-      .entity-state {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 6px 10px;
-        border-radius: 999px;
-        font-size: 0.75rem;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        font-weight: 600;
-        background: rgba(var(--rgb-warning-color), 0.15);
-        color: var(--warning-color);
-      }
-
-      .entity-state.missing {
-        background: rgba(var(--rgb-disabled-color, 189, 189, 189), 0.25);
-        color: var(--secondary-text-color);
-      }
-
-      .empty-state {
-        display: grid;
-        place-items: center;
-        padding: 32px 16px;
-        border-radius: var(--ha-card-border-radius, 12px);
-        background: rgba(var(--rgb-secondary-background-color), 0.5);
-        color: var(--secondary-text-color);
-        text-align: center;
-      }
-
-      .empty-state strong {
-        display: block;
-        margin-bottom: 8px;
-        font-size: 1rem;
-      }
-    `;
-    return style;
-  }
-
-  _escapeHtml(value) {
-    return String(value ?? "").replace(/[&<>"']/g, (char) => {
-      const entities = {
-        "&": "&amp;",
-        "<": "&lt;",
-        ">": "&gt;",
-        '"': "&quot;",
-        "'": "&#39;"
-      };
-      return entities[char] || char;
-    });
-  }
-
-  _escapeAttribute(value) {
-    return this._escapeHtml(value).replace(/`/g, "&#96;");
-  }
-
-  _attachHeaderHandler(card) {
-    const header = card.querySelector(".card-header[data-action='toggle']");
-    if (!header) {
+  _handleClick(event) {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) {
       return;
     }
 
-    const toggle = () => {
-      this._collapsed = !this._collapsed;
-      this._render();
-    };
+    if (this._header && target.closest(".card-header")) {
+      this._toggle();
+      return;
+    }
 
-    header.addEventListener("click", toggle);
-    header.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        toggle();
-      }
-    });
+    const tile = target.closest(".entity-tile.interactive");
+    if (tile) {
+      this._openMoreInfo(tile.getAttribute("data-entity"));
+    }
   }
 
-  _attachTileHandlers(card) {
-    const tiles = card.querySelectorAll(".entity-tile[data-entity]");
-    tiles.forEach((tile) => {
-      const entityId = tile.getAttribute("data-entity");
-      const missing = tile.getAttribute("data-missing") === "true";
+  _handleKeydown(event) {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
 
-      if (!entityId || missing) {
-        tile.tabIndex = -1;
-        return;
-      }
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) {
+      return;
+    }
 
-      tile.classList.add("interactive");
-      tile.tabIndex = 0;
+    if (this._header && target.closest(".card-header")) {
+      event.preventDefault();
+      this._toggle();
+      return;
+    }
 
-      const openMoreInfo = () => {
-        this.dispatchEvent(
-          new CustomEvent("hass-more-info", {
-            detail: { entityId },
-            bubbles: true,
-            composed: true
-          })
-        );
-      };
+    const tile = target.closest(".entity-tile.interactive");
+    if (tile) {
+      event.preventDefault();
+      this._openMoreInfo(tile.getAttribute("data-entity"));
+    }
+  }
 
-      tile.addEventListener("click", openMoreInfo);
-      tile.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          openMoreInfo();
-        }
-      });
-    });
+  _toggle() {
+    this._collapsed = !this._collapsed;
+    this._render(true);
+  }
+
+  _openMoreInfo(entityId) {
+    if (!entityId) {
+      return;
+    }
+
+    this.dispatchEvent(
+      new CustomEvent("hass-more-info", {
+        detail: { entityId },
+        bubbles: true,
+        composed: true
+      })
+    );
   }
 }
 
@@ -614,17 +788,14 @@ if (!customElements.get(ELEMENT_TAG)) {
 }
 
 const cardEntry = {
-  type: CARD_TYPE,
+  type: ELEMENT_TAG,
   name: "Unavailable Entity Card",
   description: "Tile-style list of unavailable or unknown entities.",
-  preview: true
+  preview: true,
+  documentationURL: "https://github.com/vineetchoudhary/lovelace-unavailable-entity-card"
 };
 
-if (window.customCards) {
-  const exists = window.customCards.some((card) => card.type === cardEntry.type);
-  if (!exists) {
-    window.customCards.push(cardEntry);
-  }
-} else {
-  window.customCards = [cardEntry];
+const customCards = (window.customCards = window.customCards || []);
+if (!customCards.some((card) => card.type === cardEntry.type)) {
+  customCards.push(cardEntry);
 }
