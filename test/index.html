@@ -80,6 +80,10 @@
   #score.bad { color: var(--fail); }
   #summary .spacer { flex: 1; }
   label.toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); cursor: pointer; }
+  .jump { display: flex; gap: 12px; margin-right: 6px; }
+  .jump a { color: var(--muted); text-decoration: none; font-size: 12px; border-bottom: 1px dotted var(--line); }
+  .jump a:hover { color: var(--fg); border-bottom-color: var(--muted); }
+  h2[id] { scroll-margin-top: 88px; }
 
   .group { margin-top: 20px; }
   .group > h3 {
@@ -143,6 +147,36 @@
   }
   .theme-dark > h4 { color: #e1e1e1; }
 
+  /* ---- interactive search harness ---- */
+  .search-lab { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 320px); gap: 16px; }
+  @media (max-width: 880px) { .search-lab { grid-template-columns: 1fr; } }
+  .search-side { display: grid; gap: 16px; align-content: start; }
+  .controls { display: grid; gap: 10px; }
+  .controls .btn-row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .controls button {
+    font: inherit; font-size: 12px; padding: 7px 11px; cursor: pointer;
+    color: var(--fg); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 7px;
+  }
+  .controls button:hover { border-color: var(--muted); }
+  .controls button:active { transform: translateY(1px); }
+  .controls .field { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+  .controls select, .controls input[type="number"] {
+    font: inherit; font-size: 12px; padding: 6px 8px;
+    color: var(--fg); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 7px;
+  }
+  .readout {
+    margin: 0; padding: 14px; display: grid; gap: 6px;
+    grid-template-columns: auto 1fr;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+  }
+  .readout dt { color: var(--muted); }
+  .readout dd { margin: 0; font-variant-numeric: tabular-nums; word-break: break-all; }
+  .readout dd.good { color: var(--pass); font-weight: 700; }
+  .readout dd.warn { color: var(--fail); font-weight: 700; }
+
   /* ---- hover bounce comparison harness ---- */
   .bounce { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
   @media (max-width: 780px) { .bounce { grid-template-columns: 1fr; } }
@@ -196,12 +230,17 @@
     <span id="score">running…</span>
     <span id="score-label" style="color:var(--muted)"></span>
     <span class="spacer"></span>
+    <nav class="jump">
+      <a href="#panel-render">Rendered</a>
+      <a href="#panel-search">Search</a>
+      <a href="#panel-hover">Hover</a>
+    </nav>
     <label class="toggle"><input type="checkbox" id="only-fails"> show failures only</label>
   </div>
 
   <div id="results"></div>
 
-  <h2>Rendered output</h2>
+  <h2 id="panel-render">Rendered output</h2>
   <div class="panel">
     <div class="themes">
       <div class="theme-pane theme-light"><h4>Light theme</h4><div class="stack" id="visual-light"></div></div>
@@ -209,7 +248,48 @@
     </div>
   </div>
 
-  <h2>Hover bounce — issue reproduction</h2>
+  <h2 id="panel-search">Search — interactive</h2>
+  <div class="panel">
+    <p class="sub" style="margin-top:0">
+      Type in the card's search box. The point of interest is the <strong>Fire updates continuously</strong>
+      switch: Home Assistant calls <code>set hass</code> on every state change in your install, so turn it
+      on and keep typing. <em>Body rebuilds</em> should climb while <em>query</em>, <em>focus lost</em> and
+      your caret position stay put — that is the whole reason the input lives outside the part of the card
+      that gets re-rendered.
+    </p>
+    <div class="search-lab">
+      <div class="theme-pane theme-light"><h4>Live card</h4><div class="stack" id="search-card"></div></div>
+      <div class="search-side">
+        <div class="controls">
+          <label class="toggle"><input type="checkbox" id="tick-auto"> Fire updates continuously (every 400&nbsp;ms)</label>
+          <div class="btn-row">
+            <button type="button" id="tick-once">Fire one update (list changes)</button>
+            <button type="button" id="tick-quiet">Fire one update (nothing relevant changed)</button>
+          </div>
+          <div class="btn-row">
+            <button type="button" id="add-one">+ Add an unavailable entity</button>
+            <button type="button" id="remove-one">− Remove one</button>
+          </div>
+          <label class="field">
+            Search mode
+            <select id="search-mode">
+              <option value="auto">auto (show past the threshold)</option>
+              <option value="true">search: true (always)</option>
+              <option value="false">search: false (never)</option>
+            </select>
+          </label>
+          <label class="field">
+            search_threshold
+            <input type="number" id="search-threshold" value="20" min="0" step="1">
+          </label>
+          <button type="button" id="reset-counters">Reset counters</button>
+        </div>
+        <dl class="readout" id="search-readout"></dl>
+      </div>
+    </div>
+  </div>
+
+  <h2 id="panel-hover">Hover bounce — issue reproduction</h2>
   <div class="panel">
     <p class="sub" style="margin-top:0">
       Move your cursor slowly onto the <strong>bottom edge</strong> of a tile in each column and watch the counters.
@@ -254,6 +334,7 @@
 
   var PATHS = {
     "mdi:chevron-down": "M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z",
+    "mdi:magnify": "M9.5,3A6.5,6.5 0 0,1 16,9.5C16,11.11 15.41,12.59 14.44,13.73L14.71,14H15.5L20.5,19L19,20.5L14,15.5V14.71L13.73,14.44C12.59,15.41 11.11,16 9.5,16A6.5,6.5 0 0,1 3,9.5A6.5,6.5 0 0,1 9.5,3M9.5,5C7,5 5,7 5,9.5C5,12 7,14 9.5,14C12,14 14,12 14,9.5C14,7 12,5 9.5,5Z",
     "mdi:alert-circle-outline": "M11,15H13V17H11V15M11,7H13V13H11V7M12,2C6.47,2 2,6.5 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20Z",
     "mdi:help-circle-outline": "M11,18H13V16H11V18M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20M12,6A4,4 0 0,0 8,10H10A2,2 0 0,1 12,8A2,2 0 0,1 14,10C14,12 11,11.75 11,15H13C13,12.75 16,12.5 16,10A4,4 0 0,0 12,6Z",
     "mdi:garage": "M3,6V19H5V17H19V19H21V6H3M5,8H19V15H5V8Z",
@@ -278,7 +359,7 @@
 <script src="../unavailable-entity-card.js"></script>
 
 <script>
-(function () {
+(async function () {
   "use strict";
 
   if (!customElements.get("unavailable-entity-card")) {
@@ -336,6 +417,28 @@
     "person.me": mk("person.me", "home", { entity_picture: "data:image/gif;base64,R0lGODlhAQABAAAAACw=", friendly_name: "Me" }),
     "sensor.noise": mk("sensor.noise", "42", {})
   } };
+
+  /* Registry shapes mirror EntityRegistryDisplayEntry: labels are IDs, and
+     area_id/device_id are omitted rather than null when unset. */
+  var registryHass = function (extraStates) {
+    var states = Object.assign({}, extraStates);
+    return {
+      states: states,
+      entities: {},
+      devices: {},
+      areas: {},
+      callWS: function (msg) {
+        if (msg && msg.type === "config/label_registry/list") {
+          return Promise.resolve([
+            { label_id: "critical_kit", name: "Critical Kit", icon: null, color: null, description: null },
+            { label_id: "noisy", name: "Noisy", icon: null, color: null, description: null }
+          ]);
+        }
+        return Promise.reject(new Error("unexpected ws call: " + (msg && msg.type)));
+      }
+    };
+  };
+  var settle = function () { return new Promise(function (r) { setTimeout(r, 0); }); };
 
   var sandbox = document.createElement("div");
   sandbox.style.cssText = "position:absolute;left:-99999px;top:0;width:420px";
@@ -619,7 +722,6 @@
     catch (e) { return true; }
   };
   eq("missing entities throws", throws({ type: "x" }), true);
-  eq("empty entities throws", throws({ type: "x", entities: [] }), true);
   eq("entry without an entity key throws", throws({ type: "x", entities: [{ name: "n" }] }), true);
   eq("blank entity string throws", throws({ type: "x", entities: ["   "] }), true);
   eq("null entry dropped when a valid one remains",
@@ -713,6 +815,298 @@
   eq("card source file exposes no globals beyond customCards",
      typeof window.UnavailableEntityCard, "undefined");
 
+  /* ================================================================== *
+   * 16. Dynamic entity selection
+   * ================================================================== */
+  section("16. Dynamic selection");
+
+  var dynStates = {
+    "sensor.a_battery": mk("sensor.a_battery", "unavailable", { friendly_name: "A Battery" }),
+    "sensor.b_battery": mk("sensor.b_battery", "unknown", { friendly_name: "B Battery" }),
+    "sensor.c_temp": mk("sensor.c_temp", "unavailable", { friendly_name: "C Temp" }),
+    "light.hall": mk("light.hall", "unavailable", { friendly_name: "Hall Light" }),
+    "switch.fine": mk("switch.fine", "on", { friendly_name: "Fine" }),
+    "sensor.hidden_one": mk("sensor.hidden_one", "unavailable", { friendly_name: "Hidden One" }),
+    "binary_sensor.dev_area": mk("binary_sensor.dev_area", "unavailable", { friendly_name: "Device Area" }),
+    "sensor.via_device": mk("sensor.via_device", "unavailable", { friendly_name: "Via Device" })
+  };
+  var dyn = registryHass(dynStates);
+  dyn.entities = {
+    "sensor.a_battery": { entity_id: "sensor.a_battery", labels: ["critical_kit"], area_id: "living" },
+    "sensor.b_battery": { entity_id: "sensor.b_battery", labels: [] },
+    "sensor.c_temp": { entity_id: "sensor.c_temp", labels: ["noisy"] },
+    "light.hall": { entity_id: "light.hall", labels: [] },
+    "switch.fine": { entity_id: "switch.fine", labels: [] },
+    "sensor.hidden_one": { entity_id: "sensor.hidden_one", labels: [], hidden: true },
+    "binary_sensor.dev_area": { entity_id: "binary_sensor.dev_area", labels: [], device_id: "dev1" },
+    "sensor.via_device": { entity_id: "sensor.via_device", labels: [], device_id: "dev2" }
+  };
+  dyn.devices = {
+    dev1: { id: "dev1", area_id: "garage", labels: [] },
+    dev2: { id: "dev2", area_id: null, labels: ["critical_kit"] }
+  };
+  dyn.areas = {
+    living: { area_id: "living", name: "Living Room", aliases: ["Lounge"] },
+    garage: { area_id: "garage", name: "Garage", aliases: [] }
+  };
+
+  var ids = function (el) {
+    return [].slice.call(el.shadowRoot.querySelectorAll(".entity-tile"))
+      .map(function (t) { return t.getAttribute("data-entity"); });
+  };
+  var discover = function (cfg) {
+    var el = document.createElement("unavailable-entity-card");
+    el.setConfig(Object.assign({ type: "custom:unavailable-entity-card" }, cfg));
+    sandbox.appendChild(el);
+    el.hass = dyn;
+    return el;
+  };
+
+  var all = discover({ all_entities: true });
+  eq("all_entities finds every unavailable entity, hidden excluded",
+     ids(all).join(","),
+     "sensor.a_battery,sensor.b_battery,sensor.c_temp,binary_sensor.dev_area,light.hall,sensor.via_device");
+  eq("all_entities needs no entities key", ids(all).length, 6);
+  eq("entities in a normal state are not discovered", ids(all).indexOf("switch.fine"), -1);
+  eq("hidden entities excluded by default", ids(all).indexOf("sensor.hidden_one"), -1);
+  eq("include_hidden opts hidden entities back in",
+     ids(discover({ all_entities: true, include_hidden: true })).indexOf("sensor.hidden_one") !== -1, true);
+  eq("discovered entities are sorted by friendly name, not entity id",
+     ids(all).slice(2, 5).join(","), "sensor.c_temp,binary_sensor.dev_area,light.hall");
+  eq("discovered entities are never 'missing'",
+     all.shadowRoot.textContent.indexOf("not available"), -1);
+  eq("all discovered tiles are interactive",
+     all.shadowRoot.querySelectorAll(".entity-tile.interactive").length, 6);
+
+  eq("entity_globs match with *",
+     ids(discover({ include: { entity_globs: ["*_battery"] } })).sort().join(","),
+     "sensor.a_battery,sensor.b_battery");
+  eq("glob ? matches exactly one character",
+     ids(discover({ include: { entity_globs: ["sensor.?_temp"] } })).join(","), "sensor.c_temp");
+  eq("glob ? matches exactly one, so two ? match nothing here",
+     ids(discover({ include: { entity_globs: ["sensor.??_temp"] } })).length, 0);
+  eq("glob ? spans single-character names",
+     ids(discover({ include: { entity_globs: ["sensor.?_battery"] } })).sort().join(","),
+     "sensor.a_battery,sensor.b_battery");
+  eq("dots in globs are escaped, not treated as any-char",
+     ids(discover({ include: { entity_globs: ["sensorXa_battery"] } })).length, 0);
+  eq("domains filter", ids(discover({ include: { domains: ["light"] } })).join(","), "light.hall");
+  eq("a scalar instead of a list is accepted",
+     ids(discover({ include: { domains: "light" } })).join(","), "light.hall");
+  eq("an include filter implies discovery without all_entities",
+     ids(discover({ include: { domains: ["light"] } })).length, 1);
+
+  eq("label by raw label_id, including via the device",
+     ids(discover({ include: { labels: ["critical_kit"] } })).sort().join(","),
+     "sensor.a_battery,sensor.via_device");
+  eq("area by name", ids(discover({ include: { areas: ["Living Room"] } })).join(","), "sensor.a_battery");
+  eq("area by alias", ids(discover({ include: { areas: ["Lounge"] } })).join(","), "sensor.a_battery");
+  eq("area by raw area_id", ids(discover({ include: { areas: ["living"] } })).join(","), "sensor.a_battery");
+  eq("area inherited from the device",
+     ids(discover({ include: { areas: ["Garage"] } })).join(","), "binary_sensor.dev_area");
+  eq("matching is case-insensitive",
+     ids(discover({ include: { areas: ["living room"], labels: ["CRITICAL_KIT"] } })).length, 2);
+
+  eq("exclude wins over include",
+     ids(discover({ include: { domains: ["sensor"] }, exclude: { entity_globs: ["*_battery"] } })).sort().join(","),
+     "sensor.c_temp,sensor.via_device");
+  eq("exclude by label", ids(discover({ all_entities: true, exclude: { labels: ["noisy"] } })).indexOf("sensor.c_temp"), -1);
+  eq("exclude by entity id",
+     ids(discover({ all_entities: true, exclude: { entities: ["sensor.a_battery"] } })).indexOf("sensor.a_battery"), -1);
+
+  var mixed = discover({ all_entities: true, entities: ["sensor.ghost_x", "sensor.a_battery"] });
+  eq("explicit entities come first and keep config order",
+     ids(mixed).slice(0, 2).join(","), ",sensor.a_battery");
+  eq("an explicitly listed missing entity still shows as not available",
+     mixed.shadowRoot.textContent.indexOf("not available") !== -1, true);
+  eq("explicit entities are not duplicated by discovery",
+     ids(mixed).filter(function (i) { return i === "sensor.a_battery"; }).length, 1);
+  eq("a static-only config does not discover anything",
+     ids(discover({ entities: ["sensor.a_battery"] })).length, 1);
+
+  /* label names need the websocket round trip */
+  var byName = discover({ include: { labels: ["Critical Kit"] } });
+  eq("label name matches nothing before the registry resolves", ids(byName).length, 0);
+  await settle();
+  eq("label name matches once the registry resolves",
+     ids(byName).sort().join(","), "sensor.a_battery,sensor.via_device");
+  eq("label name matching is case-insensitive",
+     ids(discover({ include: { labels: ["critical kit"] } })).length === 0, true);
+  var byNameLower = discover({ include: { labels: ["critical kit"] } });
+  await settle();
+  eq("resolved label names match case-insensitively", ids(byNameLower).length, 2);
+
+  /* ================================================================== *
+   * 17. Search box
+   * ================================================================== */
+  section("17. Search box");
+
+  var manyStates = {};
+  for (var s = 1; s <= 25; s++) {
+    var sid = "sensor.probe_" + (s < 10 ? "0" + s : s);
+    manyStates[sid] = mk(sid, "unavailable", { friendly_name: "Probe " + s });
+  }
+  manyStates["sensor.kettle"] = mk("sensor.kettle", "unavailable", { friendly_name: "Kettle" });
+  var manyHass = { states: manyStates };
+
+  var makeSearchCard = function (cfg) {
+    var el = document.createElement("unavailable-entity-card");
+    el.setConfig(Object.assign({ type: "custom:unavailable-entity-card", all_entities: true }, cfg));
+    sandbox.appendChild(el);
+    el.hass = manyHass;
+    return el;
+  };
+
+  var big = makeSearchCard({});
+  var searchRow = function (el) { return el.shadowRoot.querySelector(".card-search"); };
+  var searchBox = function (el) { return el.shadowRoot.querySelector(".card-search input"); };
+
+  eq("26 entities resolved", big.shadowRoot.querySelectorAll(".entity-tile").length, 26);
+  eq("search shown above the default threshold of 20", searchRow(big).hidden, false);
+  eq("search input is type=search", searchBox(big).type, "search");
+  eq("search input is labelled", !!searchBox(big).getAttribute("aria-label"), true);
+
+  var small = makeSearchCard({ include: { entities: ["sensor.kettle"] } });
+  eq("search hidden below the threshold", searchRow(small).hidden, true);
+  eq("search: true forces it on below the threshold",
+     searchRow(makeSearchCard({ search: true, include: { entities: ["sensor.kettle"] } })).hidden, false);
+  eq("search: false forces it off above the threshold",
+     searchRow(makeSearchCard({ search: false })).hidden, true);
+  eq("search_threshold is configurable",
+     searchRow(makeSearchCard({ search_threshold: 100 })).hidden, true);
+
+  var type = function (el, value) {
+    var input = searchBox(el);
+    input.value = value;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+
+  type(big, "kettle");
+  eq("filters by name", big.shadowRoot.querySelectorAll(".entity-tile").length, 1);
+  eq("matched tile is the right one",
+     big.shadowRoot.querySelector(".entity-tile").getAttribute("data-entity"), "sensor.kettle");
+  eq("count badge shows matched of total", big.shadowRoot.querySelector(".entity-count").textContent, "1/26");
+  type(big, "probe_07");
+  eq("filters by entity id", big.shadowRoot.querySelectorAll(".entity-tile").length, 1);
+  type(big, "PROBE_07");
+  eq("search is case-insensitive", big.shadowRoot.querySelectorAll(".entity-tile").length, 1);
+
+  type(big, "nothing_matches_this");
+  eq("zero matches renders the no-match state", !!big.shadowRoot.querySelector(".empty-state.no-match"), true);
+  eq("zero matches does NOT claim everything is fine",
+     big.shadowRoot.textContent.indexOf("All monitored entities look good"), -1);
+  eq("no-match message reports how many are hidden",
+     big.shadowRoot.textContent.indexOf("26 unavailable entities are hidden") !== -1, true);
+
+  /* the critical one: a hass tick must not disturb the input */
+  type(big, "probe_1");
+  var inputBefore = searchBox(big);
+  inputBefore.focus();
+  var activeBefore = big.shadowRoot.activeElement;
+  var matchesBefore = big.shadowRoot.querySelectorAll(".entity-tile").length;
+  manyStates["sensor.probe_03"] = mk("sensor.probe_03", "unknown", { friendly_name: "Probe 3" });
+  big.hass = { states: Object.assign({}, manyStates) };
+  eq("search input node survives a hass tick", searchBox(big) === inputBefore, true);
+  eq("query text survives a hass tick", searchBox(big).value, "probe_1");
+  eq("focus survives a hass tick", big.shadowRoot.activeElement === activeBefore, true);
+  eq("results still filtered after a hass tick",
+     big.shadowRoot.querySelectorAll(".entity-tile").length, matchesBefore);
+
+  type(big, "");
+  eq("clearing the query restores every row", big.shadowRoot.querySelectorAll(".entity-tile").length, 26);
+  eq("count badge drops the matched-of-total form",
+     big.shadowRoot.querySelector(".entity-count").textContent, "26");
+
+  var collapsedBig = makeSearchCard({ expanded: false });
+  eq("search hidden while collapsed", searchRow(collapsedBig).hidden, true);
+  collapsedBig.shadowRoot.querySelector(".card-header").click();
+  eq("search reappears when expanded", searchRow(collapsedBig).hidden, false);
+
+  /* a stale query must not survive the search box being disabled */
+  var toggling = makeSearchCard({});
+  type(toggling, "kettle");
+  eq("query filters while search is enabled", toggling.shadowRoot.querySelectorAll(".entity-tile").length, 1);
+  toggling.setConfig({ type: "custom:unavailable-entity-card", all_entities: true, search: false });
+  toggling.hass = manyHass;
+  eq("reconfiguring clears the query", toggling.shadowRoot.querySelectorAll(".entity-tile").length, 26);
+
+  /* ================================================================== *
+   * 18. Interop and graceful degradation
+   * ================================================================== */
+  section("18. Interop and degradation");
+
+  eq("an explicitly empty entities list no longer throws (auto-entities)",
+     throws({ type: "x", entities: [] }), false);
+  var emptyList = document.createElement("unavailable-entity-card");
+  emptyList.setConfig({ type: "custom:unavailable-entity-card", entities: [] });
+  sandbox.appendChild(emptyList);
+  emptyList.hass = hass;
+  eq("an empty list renders the empty state", !!emptyList.shadowRoot.querySelector(".empty-state"), true);
+  eq("an empty list renders no tiles", emptyList.shadowRoot.querySelectorAll(".entity-tile").length, 0);
+  eq("repeated setConfig with a changing list is tolerated", (function () {
+    try {
+      emptyList.setConfig({ type: "custom:unavailable-entity-card", entities: ["sensor.kitchen"] });
+      emptyList.hass = hass;
+      emptyList.setConfig({ type: "custom:unavailable-entity-card", entities: [] });
+      emptyList.hass = hass;
+      return emptyList.shadowRoot.querySelectorAll(".entity-tile").length === 0;
+    } catch (e) { return false; }
+  })(), true);
+
+  eq("absent entities with no selector still throws", throws({ type: "x" }), true);
+  eq("all_entities alone is a valid config", throws({ type: "x", all_entities: true }), false);
+  eq("an include filter alone is a valid config",
+     throws({ type: "x", include: { domains: ["sensor"] } }), false);
+  eq("an all-invalid entities list still throws",
+     throws({ type: "x", entities: [{ name: "no entity key" }] }), true);
+  eq("an empty include object does not silently enable discovery",
+     throws({ type: "x", include: {} }), true);
+
+  /* HA 2023.9-era registry: hass.entities exists but entries carry no labels */
+  var legacy = { states: dynStates, entities: {
+    "sensor.a_battery": { entity_id: "sensor.a_battery", area_id: "living" }
+  }, areas: dyn.areas, devices: {} };
+  var legacyCard = document.createElement("unavailable-entity-card");
+  legacyCard.setConfig({ type: "custom:unavailable-entity-card", include: { labels: ["critical_kit"] } });
+  sandbox.appendChild(legacyCard);
+  eq("a label filter on a registry without labels does not throw", (function () {
+    try { legacyCard.hass = legacy; return true; } catch (e) { return false; }
+  })(), true);
+  eq("it simply matches nothing", legacyCard.shadowRoot.querySelectorAll(".entity-tile").length, 0);
+  eq("area filters still work on that older shape", (function () {
+    var el = document.createElement("unavailable-entity-card");
+    el.setConfig({ type: "custom:unavailable-entity-card", include: { areas: ["Living Room"] } });
+    sandbox.appendChild(el);
+    el.hass = legacy;
+    return el.shadowRoot.querySelectorAll(".entity-tile").length;
+  })(), 1);
+
+  /* no registry at all */
+  var bare = document.createElement("unavailable-entity-card");
+  bare.setConfig({ type: "custom:unavailable-entity-card", include: { labels: ["x"], areas: ["y"] } });
+  sandbox.appendChild(bare);
+  eq("label/area filters survive a hass with no registries", (function () {
+    try { bare.hass = { states: dynStates }; return true; } catch (e) { return false; }
+  })(), true);
+  eq("globs still work with no registries", (function () {
+    var el = document.createElement("unavailable-entity-card");
+    el.setConfig({ type: "custom:unavailable-entity-card", include: { entity_globs: ["*_battery"] } });
+    sandbox.appendChild(el);
+    el.hass = { states: dynStates };
+    return el.shadowRoot.querySelectorAll(".entity-tile").length;
+  })(), 2);
+  eq("a failing callWS is swallowed", (function () {
+    var el = document.createElement("unavailable-entity-card");
+    el.setConfig({ type: "custom:unavailable-entity-card", include: { labels: ["Critical Kit"] } });
+    sandbox.appendChild(el);
+    try {
+      el.hass = { states: dynStates, entities: dyn.entities, devices: dyn.devices, areas: dyn.areas,
+                  callWS: function () { return Promise.reject(new Error("denied")); } };
+      return true;
+    } catch (e) { return false; }
+  })(), true);
+  await settle();
+
   /* ------------------------------------------------------------------ *
    * report
    * ------------------------------------------------------------------ */
@@ -763,6 +1157,8 @@
     document.body.classList.toggle("only-fails", e.target.checked);
   });
 
+  window.__done = true;
+
   /* ------------------------------------------------------------------ *
    * visual previews
    * ------------------------------------------------------------------ */
@@ -796,6 +1192,153 @@
       el.hass = visualHass;
     });
   });
+
+  /* ------------------------------------------------------------------ *
+   * interactive search harness
+   * ------------------------------------------------------------------ */
+  (function () {
+    var labStates = {};
+    var seq = 0;
+    var NAMES = ["Attic", "Basement", "Bathroom", "Bedroom", "Cellar", "Conservatory", "Corridor",
+                 "Dining Room", "Driveway", "Entrance", "Garage", "Garden", "Hallway", "Kitchen",
+                 "Landing", "Laundry", "Living Room", "Loft", "Nursery", "Office", "Outhouse",
+                 "Pantry", "Patio", "Porch", "Shed", "Stairwell", "Studio", "Utility", "Workshop"];
+
+    var addEntity = function () {
+      seq++;
+      var name = NAMES[(seq - 1) % NAMES.length];
+      var suffix = seq > NAMES.length ? " " + Math.ceil(seq / NAMES.length) : "";
+      var id = "sensor." + name.toLowerCase().replace(/ /g, "_") + (suffix ? "_" + Math.ceil(seq / NAMES.length) : "") + "_battery";
+      labStates[id] = mk(id, seq % 4 === 0 ? "unknown" : "unavailable", {
+        friendly_name: name + suffix + " Battery"
+      });
+      return id;
+    };
+    var removeEntity = function () {
+      var keys = Object.keys(labStates).filter(function (k) { return k !== "sensor.weather_station"; });
+      if (!keys.length) return;
+      delete labStates[keys[keys.length - 1]];
+      seq = Math.max(0, seq - 1);
+    };
+
+    for (var n = 0; n < 25; n++) addEntity();
+    /* a always-fine entity so "nothing relevant changed" has something to move */
+    labStates["sensor.weather_station"] = mk("sensor.weather_station", "17.4", { friendly_name: "Weather Station" });
+
+    var lab = document.createElement("unavailable-entity-card");
+    var applyConfig = function () {
+      var mode = document.getElementById("search-mode").value;
+      var threshold = Number(document.getElementById("search-threshold").value);
+      var cfg = {
+        type: "custom:unavailable-entity-card",
+        title: "Unavailable entities",
+        all_entities: true,
+        search_threshold: Number.isFinite(threshold) ? threshold : 20
+      };
+      if (mode === "true") cfg.search = true;
+      if (mode === "false") cfg.search = false;
+      lab.setConfig(cfg);
+      push();
+    };
+    var push = function () { lab.hass = { states: Object.assign({}, labStates) }; };
+
+    document.getElementById("search-card").appendChild(lab);
+    applyConfig();
+
+    var rebuilds = 0;
+    var blurs = 0;
+    var inputEvents = 0;
+    var observed = null;
+    var observer = new MutationObserver(function () { rebuilds++; paint(); });
+    var wire = function () {
+      var body = lab.shadowRoot.querySelector(".card-body");
+      if (body && body !== observed) {
+        observed = body;
+        observer.observe(body, { childList: true });
+      }
+      var input = lab.shadowRoot.querySelector(".card-search input");
+      if (input && !input.dataset.wired) {
+        input.dataset.wired = "1";
+        input.addEventListener("blur", function () { blurs++; paint(); });
+        input.addEventListener("input", function () { inputEvents++; paint(); });
+      }
+    };
+
+    var row = function (dt, dd, cls) {
+      return "<dt>" + dt + "</dt><dd" + (cls ? ' class="' + cls + '"' : "") + ">" + dd + "</dd>";
+    };
+    var paint = function () {
+      wire();
+      var sr = lab.shadowRoot;
+      var input = sr.querySelector(".card-search input");
+      var searchRow = sr.querySelector(".card-search");
+      var badge = sr.querySelector(".entity-count");
+      var tiles = sr.querySelectorAll(".entity-tile").length;
+      var total = Object.keys(labStates).filter(function (k) {
+        var s = labStates[k].state;
+        return s === "unavailable" || s === "unknown";
+      }).length;
+      var query = input ? input.value : "";
+      var focused = sr.activeElement === input && input;
+      var noMatch = !!sr.querySelector(".empty-state.no-match");
+
+      document.getElementById("search-readout").innerHTML =
+        row("unavailable", total) +
+        row("rows shown", tiles + (noMatch ? " (no match)" : "")) +
+        row("count badge", badge ? (badge.hidden ? "(hidden)" : badge.textContent) : "(no header)") +
+        row("search box", searchRow ? (searchRow.hidden ? "hidden" : "visible") : "—") +
+        row("query", query ? '"' + query + '"' : "(empty)") +
+        row("caret", input ? input.selectionStart : "—") +
+        row("has focus", focused ? "yes" : "no", focused ? "good" : "") +
+        row("body rebuilds", rebuilds) +
+        row("input events", inputEvents) +
+        row("focus lost", blurs, blurs > 0 ? "warn" : "good");
+    };
+
+    var timer = null;
+    var quietFlip = false;
+    document.getElementById("tick-auto").addEventListener("change", function (e) {
+      if (timer) { clearInterval(timer); timer = null; }
+      if (e.target.checked) {
+        timer = setInterval(function () {
+          /* flip one entity in and out of an unavailable state so the resolved
+             list really changes and the body has to be rebuilt */
+          var target = "sensor.attic_battery";
+          if (labStates[target]) {
+            labStates[target] = mk(target, labStates[target].state === "unavailable" ? "on" : "unavailable",
+                                   { friendly_name: "Attic Battery" });
+          }
+          push();
+          paint();
+        }, 400);
+      }
+    });
+    document.getElementById("tick-once").addEventListener("click", function () {
+      var target = "sensor.attic_battery";
+      if (labStates[target]) {
+        labStates[target] = mk(target, labStates[target].state === "unavailable" ? "on" : "unavailable",
+                               { friendly_name: "Attic Battery" });
+      }
+      push();
+      paint();
+    });
+    document.getElementById("tick-quiet").addEventListener("click", function () {
+      quietFlip = !quietFlip;
+      labStates["sensor.weather_station"] =
+        mk("sensor.weather_station", quietFlip ? "18.1" : "17.4", { friendly_name: "Weather Station" });
+      push();
+      paint();
+    });
+    document.getElementById("add-one").addEventListener("click", function () { addEntity(); push(); paint(); });
+    document.getElementById("remove-one").addEventListener("click", function () { removeEntity(); push(); paint(); });
+    document.getElementById("search-mode").addEventListener("change", applyConfig);
+    document.getElementById("search-threshold").addEventListener("input", applyConfig);
+    document.getElementById("reset-counters").addEventListener("click", function () {
+      rebuilds = 0; blurs = 0; inputEvents = 0; paint();
+    });
+
+    paint();
+  })();
 
   /* ------------------------------------------------------------------ *
    * live hover-bounce meters

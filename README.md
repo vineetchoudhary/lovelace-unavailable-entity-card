@@ -175,6 +175,8 @@ The card accepts an empty entity list, so it renders its empty state rather than
 
 No build step is required. Adjust `unavailable-entity-card.js` directly and refresh your dashboard to see changes.
 
+`test/index.html` is a dependency-free browser test suite — open it in Chrome. It loads `../unavailable-entity-card.js` directly, so it always exercises the real card file.
+
 ## License
 
 MIT
