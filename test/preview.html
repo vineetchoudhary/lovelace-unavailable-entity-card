@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Unavailable Entity Card — light / dark preview</title>
+<style>
+  html, body { margin: 0; padding: 0; }
+  body {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    font-family: Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  .pane { padding: 30px 32px 34px; }
+  .pane > h4 {
+    margin: 0 0 18px;
+    font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    opacity: .55;
+  }
+  .stack { display: grid; gap: 16px; }
+
+  .theme-light {
+    --rgb-primary-color: 0, 154, 199;
+    --rgb-primary-text-color: 33, 33, 33;
+    --rgb-secondary-text-color: 114, 114, 114;
+    --rgb-warning-color: 255, 166, 0;
+    --primary-color: #009ac7;
+    --primary-text-color: #212121;
+    --secondary-text-color: #727272;
+    --warning-color: #ffa600;
+    --card-background-color: #fff;
+    --ha-card-border-radius: 12px;
+    background: #f2f4f9;
+    color: #212121;
+  }
+  .theme-dark {
+    --rgb-primary-color: 0, 154, 199;
+    --rgb-primary-text-color: 225, 225, 225;
+    --rgb-secondary-text-color: 155, 155, 155;
+    --rgb-warning-color: 255, 166, 0;
+    --primary-color: #009ac7;
+    --primary-text-color: #e1e1e1;
+    --secondary-text-color: #9b9b9b;
+    --warning-color: #ffa600;
+    --card-background-color: #1c1c1c;
+    --ha-card-border-radius: 12px;
+    background: #111114;
+    color: #e1e1e1;
+  }
+</style>
+<script>
+(function () {
+  class HaCard extends HTMLElement {
+    constructor() {
+      super();
+      this.attachShadow({ mode: "open" }).innerHTML =
+        '<style>:host{display:block;border-radius:var(--ha-card-border-radius,12px);' +
+        'box-shadow:0 2px 2px rgba(0,0,0,.12)}</style><slot></slot>';
+    }
+  }
+  customElements.define("ha-card", HaCard);
+
+  var PATHS = {
+    "mdi:chevron-down": "M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z",
+    "mdi:alert-circle-outline": "M11,15H13V17H11V15M11,7H13V13H11V7M12,2C6.47,2 2,6.5 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20Z",
+    "mdi:help-circle-outline": "M11,18H13V16H11V18M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20M12,6A4,4 0 0,0 8,10H10A2,2 0 0,1 12,8A2,2 0 0,1 14,10C14,12 11,11.75 11,15H13C13,12.75 16,12.5 16,10A4,4 0 0,0 12,6Z"
+  };
+  class HaIcon extends HTMLElement {
+    static get observedAttributes() { return ["icon"]; }
+    connectedCallback() { this._draw(); }
+    attributeChangedCallback() { this._draw(); }
+    _draw() {
+      if (!this.shadowRoot) this.attachShadow({ mode: "open" });
+      var d = PATHS[this.getAttribute("icon")] || PATHS["mdi:alert-circle-outline"];
+      this.shadowRoot.innerHTML =
+        '<style>:host{display:inline-flex;width:24px;height:24px}svg{width:100%;height:100%;fill:currentColor}</style>' +
+        '<svg viewBox="0 0 24 24"><path d="' + d + '"></path></svg>';
+    }
+  }
+  customElements.define("ha-icon", HaIcon);
+})();
+</script>
+</head>
+<body>
+  <div class="pane theme-light"><h4>Light theme</h4><div class="stack" id="light"></div></div>
+  <div class="pane theme-dark"><h4>Dark theme</h4><div class="stack" id="dark"></div></div>
+
+<script src="../unavailable-entity-card.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var st = function (id, state, attrs) {
+    return { entity_id: id, state: state, attributes: attrs || {} };
+  };
+
+  var states = {
+    "sensor.epson_l3250_series": st("sensor.epson_l3250_series", "unavailable", { friendly_name: "EPSON Printer L3250" }),
+    "sensor.ups_status": st("sensor.ups_status", "offline", { friendly_name: "UPS Status" })
+  };
+  // media_player.vineets_xbox is deliberately absent so it renders as "not available".
+
+  var collapsedEntities = [];
+  for (var i = 1; i <= 17; i++) {
+    var id = "sensor.remote_probe_" + i;
+    states[id] = st(id, "unavailable", { friendly_name: "Remote Probe " + i });
+    collapsedEntities.push(id);
+  }
+
+  var hass = { states: states };
+
+  var configs = [
+    {
+      title: "Critical Devices & Services",
+      entities: [
+        "sensor.epson_l3250_series",
+        { entity: "media_player.vineets_xbox", name: "Xbox" },
+        "sensor.ups_status"
+      ],
+      unavailable_states: [{ state: "offline", background: "#f0f4c3", color: "#827717" }]
+    },
+    { title: "Critical Sensors", expanded: false, entities: collapsedEntities }
+  ];
+
+  ["light", "dark"].forEach(function (paneId) {
+    var pane = document.getElementById(paneId);
+    configs.forEach(function (cfg) {
+      var el = document.createElement("unavailable-entity-card");
+      el.setConfig(Object.assign({ type: "custom:unavailable-entity-card" }, cfg));
+      pane.appendChild(el);
+      el.hass = hass;
+    });
+  });
+
+  document.documentElement.dataset.ready = "true";
+})();
+</script>
+</body>
+</html>
