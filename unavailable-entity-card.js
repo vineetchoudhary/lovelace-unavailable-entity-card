@@ -5,6 +5,8 @@ const DEFAULT_ICON = "mdi:alert-circle-outline";
 const MISSING_ICON = "mdi:help-circle-outline";
 const MISSING_STATE = "not available";
 const DEFAULT_UNAVAILABLE_STATES = new Set(["unavailable", "unknown"]);
+const DEFAULT_SEARCH_THRESHOLD = 20;
+const LABEL_REGISTRY_MESSAGE = "config/label_registry/list";
 
 const HTML_ESCAPES = {
   "&": "&amp;",
@@ -52,6 +54,60 @@ const sanitizeStyleValue = (value) => {
 
   const cleaned = value.slice(0, end).trim();
   return cleaned || undefined;
+};
+
+const toList = (value) => {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  return Array.isArray(value) ? value : [value];
+};
+
+const toLowerSet = (value) =>
+  new Set(
+    toList(value)
+      .filter((item) => typeof item === "string")
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean)
+  );
+
+const globToRegExp = (glob) => {
+  let pattern = "";
+  for (const char of glob) {
+    if (char === "*") {
+      pattern += ".*";
+    } else if (char === "?") {
+      pattern += ".";
+    } else {
+      pattern += char.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+    }
+  }
+  return new RegExp(`^${pattern}$`, "i");
+};
+
+const buildFilter = (section) => {
+  if (!section || typeof section !== "object" || Array.isArray(section)) {
+    return undefined;
+  }
+
+  const filter = {
+    entities: toLowerSet(section.entities),
+    domains: toLowerSet(section.domains),
+    labels: toLowerSet(section.labels),
+    areas: toLowerSet(section.areas),
+    globs: toList(section.entity_globs)
+      .filter((glob) => typeof glob === "string" && glob.trim() !== "")
+      .map((glob) => globToRegExp(glob.trim()))
+  };
+
+  const active =
+    filter.entities.size ||
+    filter.domains.size ||
+    filter.labels.size ||
+    filter.areas.size ||
+    filter.globs.length;
+
+  return active ? filter : undefined;
 };
 
 const CARD_STYLES = `
@@ -121,6 +177,44 @@ const CARD_STYLES = `
 
   ha-card.collapsed .collapse-icon {
     transform: rotate(-90deg);
+  }
+
+  .card-search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 8px 4px;
+  }
+
+  .card-search[hidden] {
+    display: none;
+  }
+
+  .card-search ha-icon {
+    flex: 0 0 auto;
+    color: var(--secondary-text-color);
+  }
+
+  .card-search input {
+    flex: 1 1 auto;
+    min-width: 0;
+    font: inherit;
+    font-size: 0.9rem;
+    padding: 8px 10px;
+    color: var(--primary-text-color);
+    background: rgba(var(--rgb-primary-text-color, 33, 33, 33), 0.04);
+    border: 1px solid rgba(var(--rgb-primary-text-color, 33, 33, 33), 0.12);
+    border-radius: var(--ha-card-border-radius, 12px);
+  }
+
+  .card-search input::placeholder {
+    color: var(--secondary-text-color);
+    opacity: 0.8;
+  }
+
+  .card-search input:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 1px;
   }
 
   .card-body {
@@ -238,6 +332,10 @@ const CARD_STYLES = `
     font-size: 1rem;
   }
 
+  .empty-state.no-match strong {
+    margin-bottom: 4px;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .entity-tile,
     .collapse-icon {
@@ -287,9 +385,21 @@ class UnavailableEntityCard extends HTMLElement {
     this._titleElement = undefined;
     this._countElement = undefined;
     this._body = undefined;
+    this._searchRow = undefined;
+    this._searchInput = undefined;
+
+    this._include = undefined;
+    this._exclude = undefined;
+    this._discover = false;
+    this._includeHidden = false;
+    this._needsLabels = false;
+    this._labelNames = new Map();
+    this._labelsRequested = false;
+    this._query = "";
 
     this._handleClick = this._handleClick.bind(this);
     this._handleKeydown = this._handleKeydown.bind(this);
+    this._handleSearchInput = this._handleSearchInput.bind(this);
   }
 
   static getStubConfig(hass, entities, entitiesFallback) {
@@ -314,11 +424,13 @@ class UnavailableEntityCard extends HTMLElement {
   }
 
   setConfig(config) {
-    if (!config || !Array.isArray(config.entities)) {
+    if (!config) {
       throw new Error("You need to define entities");
     }
 
-    const entities = config.entities
+    const configured = Array.isArray(config.entities) ? config.entities : undefined;
+
+    const entities = (configured || [])
       .map((entry) => {
         if (typeof entry === "string") {
           return { entity: entry.trim() };
@@ -330,8 +442,27 @@ class UnavailableEntityCard extends HTMLElement {
       })
       .filter((entry) => entry && typeof entry.entity === "string" && entry.entity !== "");
 
-    if (entities.length === 0) {
-      throw new Error("You need to define entities");
+    this._include = buildFilter(config.include);
+    this._exclude = buildFilter(config.exclude);
+    this._discover = config.all_entities === true || this._include !== undefined;
+    this._includeHidden = config.include_hidden === true;
+
+    this._needsLabels =
+      (this._include ? this._include.labels.size > 0 : false) ||
+      (this._exclude ? this._exclude.labels.size > 0 : false);
+    this._labelsRequested = false;
+    this._labelNames = new Map();
+    this._query = "";
+
+    if (!this._discover) {
+      if (!configured) {
+        throw new Error(
+          "You need to define entities, or set all_entities: true or an include filter"
+        );
+      }
+      if (configured.length > 0 && entities.length === 0) {
+        throw new Error("You need to define entities");
+      }
     }
 
     this._config = { ...config, entities };
@@ -351,6 +482,7 @@ class UnavailableEntityCard extends HTMLElement {
     if (!this._config) {
       return;
     }
+    this._ensureLabelNames();
     this._entities = this._calculateEntities();
     this._render();
   }
@@ -364,8 +496,9 @@ class UnavailableEntityCard extends HTMLElement {
       return 1;
     }
     const headerRows = this._config && this._config.show_header === false ? 0 : 1;
-    const entityRows = this._entities.length || 1;
-    return Math.max(1, headerRows + entityRows);
+    const searchRows = this._searchEnabled() ? 1 : 0;
+    const entityRows = this._visibleEntities().length || 1;
+    return Math.max(1, headerRows + searchRows + entityRows);
   }
 
   getGridOptions() {
@@ -382,9 +515,11 @@ class UnavailableEntityCard extends HTMLElement {
       return [];
     }
 
+    const listed = new Set();
     const output = [];
 
     for (const entry of this._config.entities) {
+      listed.add(entry.entity);
       const entity = this._hass.states[entry.entity];
 
       if (!entity) {
@@ -403,22 +538,188 @@ class UnavailableEntityCard extends HTMLElement {
         continue;
       }
 
-      const attributes = entity.attributes || {};
-      const name = entry.name || attributes.friendly_name || entity.entity_id;
-      const icon = entry.icon || (typeof attributes.icon === "string" ? attributes.icon : undefined);
-      const picture = typeof attributes.entity_picture === "string" ? attributes.entity_picture : undefined;
-
-      output.push({
-        id: entity.entity_id,
-        name,
-        state: entity.state,
-        icon,
-        picture,
-        missing: false
-      });
+      output.push(this._describeEntity(entity, entry));
     }
 
-    return output;
+    if (!this._discover) {
+      return output;
+    }
+
+    const discovered = [];
+
+    for (const entityId in this._hass.states) {
+      if (listed.has(entityId)) {
+        continue;
+      }
+      if (this._include && !this._matchesFilter(this._include, entityId)) {
+        continue;
+      }
+      if (this._exclude && this._matchesFilter(this._exclude, entityId)) {
+        continue;
+      }
+      if (!this._includeHidden && this._isHidden(entityId)) {
+        continue;
+      }
+
+      const entity = this._hass.states[entityId];
+      if (!entity || !this._unavailableStates.has(entity.state)) {
+        continue;
+      }
+
+      discovered.push(this._describeEntity(entity, {}));
+    }
+
+    discovered.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+
+    return output.concat(discovered);
+  }
+
+  _describeEntity(entity, entry) {
+    const attributes = entity.attributes || {};
+    const name = entry.name || attributes.friendly_name || entity.entity_id;
+    const icon = entry.icon || (typeof attributes.icon === "string" ? attributes.icon : undefined);
+    const picture =
+      typeof attributes.entity_picture === "string" ? attributes.entity_picture : undefined;
+
+    return {
+      id: entity.entity_id,
+      name,
+      state: entity.state,
+      icon,
+      picture,
+      missing: false
+    };
+  }
+
+  _registryEntry(entityId) {
+    const registry = this._hass ? this._hass.entities : undefined;
+    return registry ? registry[entityId] : undefined;
+  }
+
+  _isHidden(entityId) {
+    const entry = this._registryEntry(entityId);
+    return entry ? entry.hidden === true : false;
+  }
+
+  _matchesFilter(filter, entityId) {
+    if (filter.entities.size && filter.entities.has(entityId.toLowerCase())) {
+      return true;
+    }
+
+    if (filter.domains.size) {
+      const separator = entityId.indexOf(".");
+      const domain = separator === -1 ? entityId : entityId.slice(0, separator);
+      if (filter.domains.has(domain.toLowerCase())) {
+        return true;
+      }
+    }
+
+    if (filter.globs.length && filter.globs.some((pattern) => pattern.test(entityId))) {
+      return true;
+    }
+
+    if (filter.labels.size && this._matchesLabels(filter.labels, entityId)) {
+      return true;
+    }
+
+    if (filter.areas.size && this._matchesArea(filter.areas, entityId)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  _matchesLabels(targets, entityId) {
+    const entry = this._registryEntry(entityId);
+    if (!entry) {
+      return false;
+    }
+
+    const device =
+      entry.device_id && this._hass.devices ? this._hass.devices[entry.device_id] : undefined;
+
+    const groups = [entry.labels, device ? device.labels : undefined];
+
+    for (const labels of groups) {
+      if (!Array.isArray(labels)) {
+        continue;
+      }
+      for (const labelId of labels) {
+        if (typeof labelId !== "string") {
+          continue;
+        }
+        const id = labelId.toLowerCase();
+        if (targets.has(id)) {
+          return true;
+        }
+        const name = this._labelNames.get(id);
+        if (name && targets.has(name)) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  _matchesArea(targets, entityId) {
+    const entry = this._registryEntry(entityId);
+    if (!entry) {
+      return false;
+    }
+
+    const device =
+      entry.device_id && this._hass.devices ? this._hass.devices[entry.device_id] : undefined;
+    const areaId = entry.area_id || (device ? device.area_id : undefined);
+
+    if (!areaId) {
+      return false;
+    }
+    if (targets.has(String(areaId).toLowerCase())) {
+      return true;
+    }
+
+    const area = this._hass.areas ? this._hass.areas[areaId] : undefined;
+    if (!area) {
+      return false;
+    }
+    if (typeof area.name === "string" && targets.has(area.name.toLowerCase())) {
+      return true;
+    }
+
+    return (
+      Array.isArray(area.aliases) &&
+      area.aliases.some((alias) => typeof alias === "string" && targets.has(alias.toLowerCase()))
+    );
+  }
+
+  _ensureLabelNames() {
+    if (!this._needsLabels || this._labelsRequested) {
+      return;
+    }
+    const hass = this._hass;
+    if (!hass || typeof hass.callWS !== "function") {
+      return;
+    }
+
+    this._labelsRequested = true;
+
+    hass
+      .callWS({ type: LABEL_REGISTRY_MESSAGE })
+      .then((labels) => {
+        const names = new Map();
+        for (const label of toList(labels)) {
+          if (label && typeof label.label_id === "string" && typeof label.name === "string") {
+            names.set(label.label_id.toLowerCase(), label.name.toLowerCase());
+          }
+        }
+        this._labelNames = names;
+        if (this._config) {
+          this._entities = this._calculateEntities();
+          this._render(true);
+        }
+      })
+      .catch(() => {});
   }
 
   _buildUnavailableConfig(customStates) {
@@ -550,11 +851,36 @@ class UnavailableEntityCard extends HTMLElement {
     return styles.join("; ");
   }
 
+  _searchEnabled() {
+    if (!this._config || this._config.search === false) {
+      return false;
+    }
+    if (this._config.search === true) {
+      return true;
+    }
+    const threshold = Number(this._config.search_threshold);
+    const limit = Number.isFinite(threshold) ? threshold : DEFAULT_SEARCH_THRESHOLD;
+    return this._entities.length > limit;
+  }
+
+  _visibleEntities() {
+    const query = this._query.trim().toLowerCase();
+    if (!query || !this._searchEnabled()) {
+      return this._entities;
+    }
+    return this._entities.filter(
+      (entity) =>
+        entity.name.toLowerCase().includes(query) || entity.id.toLowerCase().includes(query)
+    );
+  }
+
   _buildSignature() {
     return JSON.stringify([
       this._collapsed,
       this._config.show_header !== false,
       this._config.title ?? DEFAULT_TITLE,
+      this._searchEnabled(),
+      this._searchEnabled() ? this._query.trim().toLowerCase() : "",
       this._entities.map((entity) => [
         entity.id,
         entity.name,
@@ -577,6 +903,8 @@ class UnavailableEntityCard extends HTMLElement {
     this._titleElement = undefined;
     this._countElement = undefined;
     this._body = undefined;
+    this._searchRow = undefined;
+    this._searchInput = undefined;
     this._signature = undefined;
   }
 
@@ -597,6 +925,7 @@ class UnavailableEntityCard extends HTMLElement {
 
     this._card.classList.toggle("collapsed", this._collapsed);
     this._updateHeader();
+    this._updateSearch();
     this._updateBody();
   }
 
@@ -621,6 +950,22 @@ class UnavailableEntityCard extends HTMLElement {
       this._countElement = header.querySelector(".entity-count");
     }
 
+    const searchRow = document.createElement("div");
+    searchRow.className = "card-search";
+    searchRow.hidden = true;
+    const searchInput = document.createElement("input");
+    searchInput.type = "search";
+    searchInput.placeholder = "Search entities";
+    searchInput.setAttribute("aria-label", "Search unavailable entities");
+    searchInput.addEventListener("input", this._handleSearchInput);
+    const searchIcon = document.createElement("ha-icon");
+    searchIcon.setAttribute("icon", "mdi:magnify");
+    searchIcon.setAttribute("aria-hidden", "true");
+    searchRow.append(searchIcon, searchInput);
+    card.append(searchRow);
+    this._searchRow = searchRow;
+    this._searchInput = searchInput;
+
     const body = document.createElement("div");
     body.className = "card-body";
     card.append(body);
@@ -644,13 +989,21 @@ class UnavailableEntityCard extends HTMLElement {
     }
 
     const count = this._entities.length;
-    const countText = count > 0 ? String(count) : "";
+    const visible = this._visibleEntities().length;
+    const countText = count > 0 ? (visible === count ? String(count) : `${visible}/${count}`) : "";
     if (this._countElement.textContent !== countText) {
       this._countElement.textContent = countText;
     }
     this._countElement.hidden = count === 0;
 
     this._header.setAttribute("aria-expanded", this._collapsed ? "false" : "true");
+  }
+
+  _updateSearch() {
+    if (!this._searchRow) {
+      return;
+    }
+    this._searchRow.hidden = this._collapsed || !this._searchEnabled();
   }
 
   _updateBody() {
@@ -661,12 +1014,18 @@ class UnavailableEntityCard extends HTMLElement {
       return;
     }
 
+    if (this._entities.length === 0) {
+      this._body.innerHTML = this._renderEmptyState();
+      return;
+    }
+
+    const visible = this._visibleEntities();
     this._body.innerHTML =
-      this._entities.length > 0 ? this._renderEntities() : this._renderEmptyState();
+      visible.length > 0 ? this._renderEntities(visible) : this._renderNoMatchState();
   }
 
-  _renderEntities() {
-    const items = this._entities
+  _renderEntities(entities) {
+    const items = entities
       .map((entity) => {
         const stateStyle = this._getStateStyle(entity.state);
         const styleAttribute = stateStyle ? ` style="${stateStyle}"` : "";
@@ -723,6 +1082,17 @@ class UnavailableEntityCard extends HTMLElement {
     `;
   }
 
+  _renderNoMatchState() {
+    return `
+      <div class="empty-state no-match">
+        <strong>No entities match your search</strong>
+        <span>${this._entities.length} unavailable ${
+          this._entities.length === 1 ? "entity is" : "entities are"
+        } hidden by the current filter.</span>
+      </div>
+    `;
+  }
+
   _handleClick(event) {
     const target = event.target instanceof Element ? event.target : null;
     if (!target) {
@@ -761,6 +1131,11 @@ class UnavailableEntityCard extends HTMLElement {
       event.preventDefault();
       this._openMoreInfo(tile.getAttribute("data-entity"));
     }
+  }
+
+  _handleSearchInput(event) {
+    this._query = event.target.value || "";
+    this._render();
   }
 
   _toggle() {
