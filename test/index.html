@@ -1107,6 +1107,305 @@
   })(), true);
   await settle();
 
+  /* ================================================================== *
+   * 19. Grouping
+   * ================================================================== */
+  section("19. Grouping");
+
+  var groupStates = {
+    "sensor.kitchen_temp": mk("sensor.kitchen_temp", "unavailable", { friendly_name: "Kitchen Temperature" }),
+    "sensor.kitchen_humidity": mk("sensor.kitchen_humidity", "unavailable", { friendly_name: "Kitchen Humidity" }),
+    "binary_sensor.hall_motion": mk("binary_sensor.hall_motion", "unknown", { friendly_name: "Hall Motion" }),
+    "sensor.nameless_probe": mk("sensor.nameless_probe", "unavailable", { friendly_name: "Nameless Probe" }),
+    "light.orphan": mk("light.orphan", "unavailable", { friendly_name: "Orphan Light" }),
+    "sensor.no_platform": mk("sensor.no_platform", "unavailable", { friendly_name: "No Platform" }),
+    "switch.healthy": mk("switch.healthy", "on", { friendly_name: "Healthy" })
+  };
+  var groupHass = registryHass(groupStates);
+  groupHass.entities = {
+    "sensor.kitchen_temp": { entity_id: "sensor.kitchen_temp", labels: [], device_id: "dev_kitchen", platform: "mqtt" },
+    "sensor.kitchen_humidity": { entity_id: "sensor.kitchen_humidity", labels: [], device_id: "dev_kitchen", platform: "mqtt" },
+    "binary_sensor.hall_motion": { entity_id: "binary_sensor.hall_motion", labels: [], device_id: "dev_hall", platform: "zwave_js", area_id: "hall" },
+    "sensor.nameless_probe": { entity_id: "sensor.nameless_probe", labels: [], device_id: "dev_blank", platform: "zwave_js" },
+    "light.orphan": { entity_id: "light.orphan", labels: [], platform: "hue", area_id: "kitchen" },
+    "sensor.no_platform": { entity_id: "sensor.no_platform", labels: [] },
+    "switch.healthy": { entity_id: "switch.healthy", labels: [], device_id: "dev_kitchen", platform: "mqtt" }
+  };
+  /* dev_hall carries both name and name_by_user; dev_blank carries neither */
+  groupHass.devices = {
+    dev_kitchen: { id: "dev_kitchen", name: "Kitchen Multisensor", area_id: "kitchen", labels: [] },
+    dev_hall: { id: "dev_hall", name: "Hall Sensor", name_by_user: "Hallway Motion", labels: [] },
+    dev_blank: { id: "dev_blank", labels: [] }
+  };
+  groupHass.areas = {
+    kitchen: { area_id: "kitchen", name: "Kitchen", aliases: [] },
+    hall: { area_id: "hall", name: "Hallway", aliases: [] }
+  };
+
+  var grouped = function (cfg, hassOverride) {
+    var el = document.createElement("unavailable-entity-card");
+    el.setConfig(Object.assign({ type: "custom:unavailable-entity-card", all_entities: true }, cfg));
+    sandbox.appendChild(el);
+    el.hass = hassOverride || groupHass;
+    return el;
+  };
+  var sections = function (el) {
+    return [].slice.call(el.shadowRoot.querySelectorAll(".entity-group"));
+  };
+  var headings = function (el) {
+    return sections(el).map(function (s) { return s.querySelector(".group-title").textContent; });
+  };
+  var badges = function (el) {
+    return sections(el).map(function (s) { return s.querySelector(".group-count").textContent; });
+  };
+  var sectionFor = function (el, name) {
+    return sections(el).filter(function (s) {
+      return s.querySelector(".group-title").textContent === name;
+    })[0];
+  };
+  var groupIds = function (el, name) {
+    var found = sectionFor(el, name);
+    if (!found) return null;
+    return [].slice.call(found.querySelectorAll(".entity-tile")).map(function (t) {
+      return t.getAttribute("data-entity");
+    });
+  };
+
+  /* --- by device ---------------------------------------------------- */
+  var byDevice = grouped({ group_by: "device" });
+  eq("device grouping renders one section per device", sections(byDevice).length, 4);
+  eq("sections are sorted by name with the fallback last",
+     headings(byDevice).join(","), "dev_blank,Hallway Motion,Kitchen Multisensor,No device");
+  eq("entities of one device land together",
+     groupIds(byDevice, "Kitchen Multisensor").join(","), "sensor.kitchen_humidity,sensor.kitchen_temp");
+  eq("name_by_user wins over the device name",
+     groupIds(byDevice, "Hallway Motion").join(","), "binary_sensor.hall_motion");
+  eq("a nameless device falls back to its id",
+     groupIds(byDevice, "dev_blank").join(","), "sensor.nameless_probe");
+  eq("entities with no device collect in the fallback group",
+     groupIds(byDevice, "No device").sort().join(","), "light.orphan,sensor.no_platform");
+  eq("group badges count their own rows", badges(byDevice).join(","), "1,1,2,2");
+  eq("grouping never duplicates a row",
+     byDevice.shadowRoot.querySelectorAll(".entity-tile").length, 6);
+  eq("healthy entities stay out of the groups",
+     byDevice.shadowRoot.textContent.indexOf("Healthy"), -1);
+  eq("getCardSize accounts for the group headings", byDevice.getCardSize(), 11);
+
+  /* --- by integration ---------------------------------------------- */
+  var byIntegration = grouped({ group_by: "integration" });
+  eq("integration grouping falls back to a prettified platform",
+     headings(byIntegration).join(","), "Hue,Mqtt,Zwave Js,No integration");
+  eq("platform rows land together",
+     groupIds(byIntegration, "Zwave Js").sort().join(","),
+     "binary_sensor.hall_motion,sensor.nameless_probe");
+  eq("a registry entry with no platform is ungrouped",
+     groupIds(byIntegration, "No integration").join(","), "sensor.no_platform");
+
+  var localizedHass = Object.assign({}, groupHass, {
+    localize: function (key) {
+      return {
+        "component.hue.title": "Philips Hue",
+        "component.mqtt.title": "MQTT",
+        "component.zwave_js.title": "Z-Wave JS"
+      }[key] || "";
+    }
+  });
+  eq("hass.localize supplies the real integration name",
+     headings(grouped({ group_by: "integration" }, localizedHass)).join(","),
+     "MQTT,Philips Hue,Z-Wave JS,No integration");
+  eq("a throwing localize does not break the card", (function () {
+    try {
+      var el = grouped({ group_by: "integration" }, Object.assign({}, groupHass, {
+        localize: function () { throw new Error("no translations"); }
+      }));
+      return headings(el).join(",");
+    } catch (e) { return "threw: " + e.message; }
+  })(), "Hue,Mqtt,Zwave Js,No integration");
+
+  /* --- by area ----------------------------------------------------- */
+  var byArea = grouped({ group_by: "area" });
+  eq("area grouping uses names, fallback last", headings(byArea).join(","), "Hallway,Kitchen,No area");
+  eq("an area is inherited from the device when the entity has none",
+     groupIds(byArea, "Kitchen").sort().join(","),
+     "light.orphan,sensor.kitchen_humidity,sensor.kitchen_temp");
+  eq("the entity's own area wins", groupIds(byArea, "Hallway").join(","), "binary_sensor.hall_motion");
+  eq("entities with no area anywhere are ungrouped",
+     groupIds(byArea, "No area").sort().join(","), "sensor.nameless_probe,sensor.no_platform");
+
+  /* --- by domain --------------------------------------------------- */
+  var byDomain = grouped({ group_by: "domain" });
+  eq("domain grouping prettifies the domain",
+     headings(byDomain).join(","), "Binary Sensor,Light,Sensor");
+  eq("no fallback section when every row has a domain",
+     headings(byDomain).indexOf("Other"), -1);
+  eq("domain sections hold their rows", badges(byDomain).join(","), "1,1,4");
+
+  /* --- aliases and validation -------------------------------------- */
+  eq("group_by: none renders a flat list",
+     sections(grouped({ group_by: "none" })).length, 0);
+  eq("no group_by renders a flat list", sections(grouped({})).length, 0);
+  eq("plural alias is accepted",
+     headings(grouped({ group_by: "devices" })).join(","), headings(byDevice).join(","));
+  eq("service is an alias for integration",
+     headings(grouped({ group_by: "service" })).join(","), headings(byIntegration).join(","));
+  eq("platform is an alias for integration",
+     headings(grouped({ group_by: "platform" })).join(","), headings(byIntegration).join(","));
+  eq("rooms is an alias for area",
+     headings(grouped({ group_by: "rooms" })).join(","), headings(byArea).join(","));
+  eq("an unknown group_by throws rather than silently doing nothing",
+     throws({ type: "x", all_entities: true, group_by: "divice" }), true);
+  eq("a non-string group_by throws", throws({ type: "x", all_entities: true, group_by: 5 }), true);
+  eq("an empty group_by is treated as none",
+     throws({ type: "x", all_entities: true, group_by: "" }), false);
+  eq("the error names the valid values", (function () {
+    try { document.createElement("unavailable-entity-card")
+      .setConfig({ type: "x", all_entities: true, group_by: "divice" }); return ""; }
+    catch (e) { return /device/.test(e.message) && /integration/.test(e.message); }
+  })(), true);
+
+  /* --- collapsing --------------------------------------------------- */
+  var collapsible = grouped({ group_by: "device" });
+  var kitchenHeader = sectionFor(collapsible, "Kitchen Multisensor").querySelector(".group-header");
+  eq("groups start expanded", collapsible.shadowRoot.querySelectorAll(".entity-group.collapsed").length, 0);
+  eq("an expanded group heading reports it", kitchenHeader.getAttribute("aria-expanded"), "true");
+  kitchenHeader.click();
+  eq("clicking a heading collapses that group",
+     !!sectionFor(collapsible, "Kitchen Multisensor").classList.contains("collapsed"), true);
+  eq("a collapsed group renders no rows", groupIds(collapsible, "Kitchen Multisensor").length, 0);
+  eq("a collapsed group keeps its count",
+     sectionFor(collapsible, "Kitchen Multisensor").querySelector(".group-count").textContent, "2");
+  eq("a collapsed heading reports it",
+     sectionFor(collapsible, "Kitchen Multisensor").querySelector(".group-header").getAttribute("aria-expanded"),
+     "false");
+  eq("other groups are unaffected", groupIds(collapsible, "No device").length, 2);
+  sectionFor(collapsible, "Kitchen Multisensor").querySelector(".group-header").click();
+  eq("clicking again expands it", groupIds(collapsible, "Kitchen Multisensor").length, 2);
+
+  sectionFor(collapsible, "Kitchen Multisensor").querySelector(".group-header").click();
+  collapsible.hass = groupHass;
+  eq("a hass tick does not reopen a folded group",
+     groupIds(collapsible, "Kitchen Multisensor").length, 0);
+
+  var startCollapsed = grouped({ group_by: "device", groups_expanded: false });
+  eq("groups_expanded: false starts every group folded",
+     startCollapsed.shadowRoot.querySelectorAll(".entity-group.collapsed").length, 4);
+  eq("folded groups render no rows at all",
+     startCollapsed.shadowRoot.querySelectorAll(".entity-tile").length, 0);
+  eq("the headings are still there", headings(startCollapsed).length, 4);
+  sectionFor(startCollapsed, "No device").querySelector(".group-header").click();
+  eq("one group can be opened from there",
+     startCollapsed.shadowRoot.querySelectorAll(".entity-tile").length, 2);
+
+  /* --- keyboard ----------------------------------------------------- */
+  var kb = grouped({ group_by: "device" });
+  var kbHeader = sectionFor(kb, "No device").querySelector(".group-header");
+  eq("group headings are focusable", kbHeader.getAttribute("tabindex"), "0");
+  kbHeader.focus();
+  kbHeader.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, composed: true }));
+  eq("Enter folds the group", groupIds(kb, "No device").length, 0);
+  eq("focus survives the fold",
+     kb.shadowRoot.activeElement &&
+     kb.shadowRoot.activeElement.getAttribute("data-group"),
+     "__ungrouped__");
+  kb.shadowRoot.activeElement.dispatchEvent(
+    new KeyboardEvent("keydown", { key: " ", bubbles: true, composed: true }));
+  eq("Space unfolds it again", groupIds(kb, "No device").length, 2);
+
+  /* --- interaction with search -------------------------------------- */
+  var searchable = grouped({ group_by: "device", search: true });
+  var searchIn = function (el, value) {
+    var input = el.shadowRoot.querySelector(".card-search input");
+    input.value = value;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  searchIn(searchable, "kitchen");
+  eq("filtering drops sections with no matches", headings(searchable).join(","), "Kitchen Multisensor");
+  eq("badges count matched rows while filtering", badges(searchable).join(","), "2");
+  eq("group headings are inert while filtering",
+     searchable.shadowRoot.querySelectorAll(".group-header[data-group]").length, 0);
+  eq("no chevron is offered while filtering",
+     searchable.shadowRoot.querySelectorAll(".group-icon").length, 0);
+  searchIn(searchable, "");
+  eq("clearing the query restores every section", headings(searchable).length, 4);
+
+  var foldedThenSearched = grouped({ group_by: "device", search: true, groups_expanded: false });
+  searchIn(foldedThenSearched, "kitchen");
+  eq("a query reaches inside folded groups",
+     groupIds(foldedThenSearched, "Kitchen Multisensor").length, 2);
+  searchIn(foldedThenSearched, "");
+  eq("the folded state survives the search",
+     foldedThenSearched.shadowRoot.querySelectorAll(".entity-tile").length, 0);
+
+  var noMatchGrouped = grouped({ group_by: "device", search: true });
+  searchIn(noMatchGrouped, "nothing_here");
+  eq("zero matches still renders the no-match state, not empty groups",
+     !!noMatchGrouped.shadowRoot.querySelector(".empty-state.no-match"), true);
+  eq("zero matches renders no sections", sections(noMatchGrouped).length, 0);
+
+  /* --- explicit entities and missing rows --------------------------- */
+  var withMissing = grouped({
+    group_by: "device",
+    all_entities: false,
+    entities: ["sensor.kitchen_temp", "sensor.ghost"]
+  });
+  eq("an explicitly listed entity is grouped by its device",
+     groupIds(withMissing, "Kitchen Multisensor").join(","), "sensor.kitchen_temp");
+  eq("a missing entity has no device, so it lands in the fallback section",
+     sectionFor(withMissing, "No device").textContent.indexOf("sensor.ghost") !== -1, true);
+  eq("the missing row is still rendered as not available",
+     sectionFor(withMissing, "No device").textContent.indexOf("not available") !== -1, true);
+  eq("the fallback section holds exactly that one row",
+     sectionFor(withMissing, "No device").querySelectorAll(".entity-tile").length, 1);
+
+  /* --- more-info still works from inside a group -------------------- */
+  fired = [];
+  sectionFor(byDevice, "Kitchen Multisensor").querySelector(".entity-tile.interactive").click();
+  eq("a grouped tile still opens more-info", fired.length, 1);
+  eq("and carries the right entity", fired[0].detail.entityId, "sensor.kitchen_humidity");
+  fired = [];
+
+  /* --- escaping ----------------------------------------------------- */
+  var nastyHass = registryHass({
+    "sensor.nasty": mk("sensor.nasty", "unavailable", { friendly_name: "Nasty" })
+  });
+  nastyHass.entities = { "sensor.nasty": { entity_id: "sensor.nasty", labels: [], device_id: "dev_x" } };
+  nastyHass.devices = { dev_x: { id: "dev_x", name: '<img src=x onerror="boom()">', labels: [] } };
+  var nasty = grouped({ group_by: "device" }, nastyHass);
+  eq("a device name is escaped, not parsed",
+     nasty.shadowRoot.querySelector(".group-title").textContent, '<img src=x onerror="boom()">');
+  eq("no element is injected by the device name",
+     nasty.shadowRoot.querySelectorAll(".group-title img").length, 0);
+
+  /* --- degradation -------------------------------------------------- */
+  eq("no entity registry means no grouping, not a broken card", (function () {
+    var el = grouped({ group_by: "device" }, { states: groupStates });
+    return sections(el).length === 0 && el.shadowRoot.querySelectorAll(".entity-tile").length === 6;
+  })(), true);
+  eq("a registry with no platform data degrades to a flat list", (function () {
+    var el = grouped({ group_by: "integration" }, {
+      states: groupStates,
+      entities: { "sensor.kitchen_temp": { entity_id: "sensor.kitchen_temp", labels: [] } }
+    });
+    return sections(el).length;
+  })(), 0);
+  eq("domain grouping works with no registry at all", (function () {
+    var el = grouped({ group_by: "domain" }, { states: groupStates });
+    return headings(el).join(",");
+  })(), "Binary Sensor,Light,Sensor");
+  eq("reconfiguring away from grouping clears the sections", (function () {
+    var el = grouped({ group_by: "device" });
+    el.setConfig({ type: "custom:unavailable-entity-card", all_entities: true });
+    el.hass = groupHass;
+    return sections(el).length;
+  })(), 0);
+  eq("reconfiguring resets folded groups", (function () {
+    var el = grouped({ group_by: "device" });
+    sectionFor(el, "No device").querySelector(".group-header").click();
+    el.setConfig({ type: "custom:unavailable-entity-card", all_entities: true, group_by: "device" });
+    el.hass = groupHass;
+    return el.shadowRoot.querySelectorAll(".entity-group.collapsed").length;
+  })(), 0);
+
   /* ------------------------------------------------------------------ *
    * report
    * ------------------------------------------------------------------ */
@@ -1162,13 +1461,22 @@
   /* ------------------------------------------------------------------ *
    * visual previews
    * ------------------------------------------------------------------ */
-  var visualHass = { states: {
-    "sensor.living_room_temperature": mk("sensor.living_room_temperature", "unavailable",
-      { friendly_name: "Living Room Temperature", icon: "mdi:thermometer" }),
-    "binary_sensor.garage_door": mk("binary_sensor.garage_door", "unknown", { friendly_name: "Garage Door" }),
-    "sensor.ups_status": mk("sensor.ups_status", "offline", { friendly_name: "UPS Status" }),
-    "light.kitchen": mk("light.kitchen", "on", { friendly_name: "Kitchen" })
-  } };
+  var visualHass = {
+    states: {
+      "sensor.living_room_temperature": mk("sensor.living_room_temperature", "unavailable",
+        { friendly_name: "Living Room Temperature", icon: "mdi:thermometer" }),
+      "binary_sensor.garage_door": mk("binary_sensor.garage_door", "unknown", { friendly_name: "Garage Door" }),
+      "sensor.ups_status": mk("sensor.ups_status", "offline", { friendly_name: "UPS Status" }),
+      "light.kitchen": mk("light.kitchen", "on", { friendly_name: "Kitchen" })
+    },
+    entities: {
+      "sensor.living_room_temperature": { entity_id: "sensor.living_room_temperature", labels: [], device_id: "dev_multi", platform: "zwave_js" },
+      "binary_sensor.garage_door": { entity_id: "binary_sensor.garage_door", labels: [], device_id: "dev_multi", platform: "zwave_js" },
+      "sensor.ups_status": { entity_id: "sensor.ups_status", labels: [], platform: "apcupsd" }
+    },
+    devices: { dev_multi: { id: "dev_multi", name: "Aeotec Multisensor", labels: [] } },
+    areas: {}
+  };
   var visualConfigs = [
     {
       title: "Critical sensors",
@@ -1181,7 +1489,13 @@
       unavailable_states: [{ state: "offline", background: "#f0f4c3", color: "#827717" }]
     },
     { title: "Collapsed by default", expanded: false, entities: ["sensor.living_room_temperature", "binary_sensor.garage_door"] },
-    { title: "Nothing wrong", entities: ["light.kitchen"] }
+    { title: "Nothing wrong", entities: ["light.kitchen"] },
+    {
+      title: "Grouped by device",
+      group_by: "device",
+      all_entities: true,
+      unavailable_states: [{ state: "offline", background: "#f0f4c3", color: "#827717" }]
+    }
   ];
   ["visual-light", "visual-dark"].forEach(function (id) {
     var pane = document.getElementById(id);

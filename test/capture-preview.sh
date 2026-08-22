@@ -1,19 +1,39 @@
 #!/usr/bin/env bash
 # Renders test/preview.html to screenshots/screenshot-light-dark.png at 2x.
 #
-# Usage:  ./test/capture-preview.sh  [width] [height]
+# Usage:  ./test/capture-preview.sh  [width] [height] [--case=NAME]
+#
+# --case picks a scenario from preview.html. The default case writes the README
+# hero; any other case writes screenshots/screenshot-<name>.png.
 #
 # Chromium exits on its own after --screenshot only sometimes, so this backgrounds
 # it and kills the leftover process once the file has been written.
 
 set -uo pipefail
 
-WIDTH="${1:-1000}"
-HEIGHT="${2:-455}"
+WIDTH=""
+HEIGHT=""
+CASE="default"
+
+for arg in "$@"; do
+  case "$arg" in
+    --case=*) CASE="${arg#--case=}" ;;
+    *[!0-9]*) echo "Unrecognised argument: $arg" >&2; exit 2 ;;
+    *) if [ -z "$WIDTH" ]; then WIDTH="$arg"; else HEIGHT="$arg"; fi ;;
+  esac
+done
+
+WIDTH="${WIDTH:-1000}"
+HEIGHT="${HEIGHT:-455}"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUT="$ROOT/screenshots/screenshot-light-dark.png"
-PAGE="file://$ROOT/test/preview.html"
+if [ "$CASE" = "default" ]; then
+  OUT="$ROOT/screenshots/screenshot-light-dark.png"
+  PAGE="file://$ROOT/test/preview.html"
+else
+  OUT="$ROOT/screenshots/screenshot-$CASE.png"
+  PAGE="file://$ROOT/test/preview.html?case=$CASE"
+fi
 
 BROWSER=""
 for candidate in \

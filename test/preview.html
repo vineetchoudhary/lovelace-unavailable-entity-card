@@ -95,33 +95,94 @@
     return { entity_id: id, state: state, attributes: attrs || {} };
   };
 
-  var states = {
-    "sensor.epson_l3250_series": st("sensor.epson_l3250_series", "unavailable", { friendly_name: "EPSON Printer L3250" }),
-    "sensor.ups_status": st("sensor.ups_status", "offline", { friendly_name: "UPS Status" })
+  var OFFLINE_STYLE = [{ state: "offline", background: "#f0f4c3", color: "#827717" }];
+
+  /* ?case=default (the README hero) | ?case=grouped */
+  var CASES = {};
+
+  CASES.default = function () {
+    var states = {
+      "sensor.epson_l3250_series": st("sensor.epson_l3250_series", "unavailable", { friendly_name: "EPSON Printer L3250" }),
+      "sensor.ups_status": st("sensor.ups_status", "offline", { friendly_name: "UPS Status" })
+    };
+    // media_player.vineets_xbox is deliberately absent so it renders as "not available".
+
+    var collapsedEntities = [];
+    for (var i = 1; i <= 17; i++) {
+      var id = "sensor.remote_probe_" + i;
+      states[id] = st(id, "unavailable", { friendly_name: "Remote Probe " + i });
+      collapsedEntities.push(id);
+    }
+
+    return {
+      hass: { states: states },
+      configs: [
+        {
+          title: "Critical Devices & Services",
+          entities: [
+            "sensor.epson_l3250_series",
+            { entity: "media_player.vineets_xbox", name: "Xbox" },
+            "sensor.ups_status"
+          ],
+          unavailable_states: OFFLINE_STYLE
+        },
+        { title: "Critical Sensors", expanded: false, entities: collapsedEntities }
+      ]
+    };
   };
-  // media_player.vineets_xbox is deliberately absent so it renders as "not available".
 
-  var collapsedEntities = [];
-  for (var i = 1; i <= 17; i++) {
-    var id = "sensor.remote_probe_" + i;
-    states[id] = st(id, "unavailable", { friendly_name: "Remote Probe " + i });
-    collapsedEntities.push(id);
-  }
+  CASES.grouped = function () {
+    var rows = [
+      ["sensor.epson_l3250_ink_black", "Black Ink", "unavailable", "dev_printer"],
+      ["sensor.epson_l3250_status", "Status", "unavailable", "dev_printer"],
+      ["binary_sensor.hallway_protect_online", "Hallway Protect Online", "unknown", "dev_protect"],
+      ["sensor.hallway_protect_battery", "Hallway Protect Battery", "unavailable", "dev_protect"],
+      ["sensor.hallway_protect_co", "Hallway Protect CO", "unavailable", "dev_protect"],
+      ["sensor.ups_status", "UPS Status", "offline", "dev_ups"],
+      ["sensor.ups_load", "UPS Load", "unavailable", "dev_ups"],
+      ["sensor.internet_uptime", "Internet Uptime", "unavailable", null]
+    ];
 
-  var hass = { states: states };
+    var states = {};
+    var entities = {};
+    rows.forEach(function (row) {
+      states[row[0]] = st(row[0], row[2], { friendly_name: row[1] });
+      entities[row[0]] = { entity_id: row[0], labels: [] };
+      if (row[3]) entities[row[0]].device_id = row[3];
+    });
 
-  var configs = [
-    {
-      title: "Critical Devices & Services",
-      entities: [
-        "sensor.epson_l3250_series",
-        { entity: "media_player.vineets_xbox", name: "Xbox" },
-        "sensor.ups_status"
+    return {
+      hass: {
+        states: states,
+        entities: entities,
+        devices: {
+          dev_printer: { id: "dev_printer", name: "EPSON L3250 Series", labels: [] },
+          dev_protect: { id: "dev_protect", name: "Nest Protect", name_by_user: "Hallway Protect", labels: [] },
+          dev_ups: { id: "dev_ups", name: "APC Back-UPS", labels: [] }
+        },
+        areas: {}
+      },
+      configs: [
+        {
+          title: "Unavailable by device",
+          group_by: "device",
+          all_entities: true,
+          unavailable_states: OFFLINE_STYLE
+        }
       ],
-      unavailable_states: [{ state: "offline", background: "#f0f4c3", color: "#827717" }]
-    },
-    { title: "Critical Sensors", expanded: false, entities: collapsedEntities }
-  ];
+      /* Fold one group so the screenshot shows both states of a heading. */
+      after: function (el) {
+        [].slice.call(el.shadowRoot.querySelectorAll(".group-header")).forEach(function (header) {
+          if (header.querySelector(".group-title").textContent === "EPSON L3250 Series") header.click();
+        });
+      }
+    };
+  };
+
+  var requested = new URLSearchParams(location.search).get("case") || "default";
+  var scenario = (CASES[requested] || CASES.default)();
+  var hass = scenario.hass;
+  var configs = scenario.configs;
 
   ["light", "dark"].forEach(function (paneId) {
     var pane = document.getElementById(paneId);
@@ -130,6 +191,7 @@
       el.setConfig(Object.assign({ type: "custom:unavailable-entity-card" }, cfg));
       pane.appendChild(el);
       el.hass = hass;
+      if (scenario.after) scenario.after(el);
     });
   });
 
