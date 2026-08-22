@@ -16,20 +16,15 @@ A Lovelace card that surfaces the entities Home Assistant has quietly lost. Poin
   - [Critical devices, several selectors at once](#critical-devices-several-selectors-at-once)
   - [A hand-picked watchlist](#a-hand-picked-watchlist)
   - [Custom states from an integration](#custom-states-from-an-integration)
+  - [Grouped by device, integration or area](#grouped-by-device-integration-or-area)
   - [Compact badge for a header row](#compact-badge-for-a-header-row)
   - [One card per floor](#one-card-per-floor)
 - [Configuration reference](#configuration-reference)
   - [Card options](#card-options)
   - [Entity options](#entity-options)
   - [`include` / `exclude` selectors](#include--exclude-selectors)
+  - [`group_by` options](#group_by-options)
   - [`unavailable_states` options](#unavailable_states-options)
-- [Features in depth](#features-in-depth)
-  - [Finding entities automatically](#finding-entities-automatically)
-  - [Searching](#searching)
-  - [Collapsing](#collapsing)
-  - [Styling states](#styling-states)
-  - [Missing entities](#missing-entities)
-  - [The empty state](#the-empty-state)
 - [Using auto-entities](#using-auto-entities)
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
@@ -42,6 +37,7 @@ A Lovelace card that surfaces the entities Home Assistant has quietly lost. Poin
 - Shows only entities in an unavailable state
 - Flags entities that no longer exist in Home Assistant at all as `not available`
 - Custom states are yours to define: `offline`, `error`, `idle` with per-state badge colors
+- Groups rows by device, integration, area or domain, so one dead device reads as one foldable heading
 - Search box appears automatically once the list gets long
 - Tapping a row opens the standard more-info dialog
 - Theme-aware, responsive, and available from the card picker with a live preview
@@ -190,6 +186,29 @@ unavailable_states:
 
 `unavailable` and `unknown` are always included, anything you add here is on top of them.
 
+### Grouped by device, integration or area
+
+One dead device usually takes half a dozen entities down with it. `group_by: device` collapses that into a single heading with a count, so a flat list of eight rows reads as "three things are wrong" instead.
+
+![Grouped by device, light and dark](screenshots/screenshot-grouped.png)
+
+```yaml
+type: custom:unavailable-entity-card
+title: Unavailable by device
+all_entities: true
+group_by: device
+```
+
+Each heading folds on click, so you can acknowledge the printer and keep looking. Group by whatever answers your question: `integration` when you suspect one integration has dropped its connection, `area` when a room is dark, `domain` for a quick shape of what kind of thing is failing.
+
+```yaml
+type: custom:unavailable-entity-card
+title: Which integration died?
+all_entities: true
+group_by: integration
+groups_expanded: false     # start with every heading folded
+```
+
 ### Compact badge for a header row
 
 With `show_header: false` the card is just the list, which makes it a good citizen inside a `vertical-stack` or a grid where a heading already exists.
@@ -237,6 +256,8 @@ cards:
 | `title` | No | `Unavailable entities` | Card header text |
 | `show_header` | No | `true` | `false` drops the header, count badge and collapse control |
 | `expanded` | No | `true` | `false` starts the card collapsed |
+| `group_by` | No | `none` | Group rows under foldable headings, by `device`, `integration`, `area` or `domain` — see [options](#group_by-options) |
+| `groups_expanded` | No | `true` | `false` starts every group folded |
 | `search` | No | *(automatic)* | Force the search box on or off, regardless of list length |
 | `search_threshold` | No | `20` | How many entities must be listed before the search box appears on its own |
 | `unavailable_states` | No | `[unavailable, unknown]` | Extra states to treat as unavailable, with optional colors — see [options](#unavailable_states-options) |
@@ -274,6 +295,27 @@ exclude:
   entity_globs: "*_last_seen"
   labels: [Ignore]
 ```
+
+### `group_by` options
+
+| Value | Groups by | Heading text |
+| --- | --- | --- |
+| `none` | *(default)* nothing, a flat list | — |
+| `device` | The entity's device | The name you gave the device in Home Assistant, else its own name, else its device id |
+| `integration` | The integration that provides the entity | The integration's name as Home Assistant knows it, e.g. `zwave_js` reads **Z-Wave JS** |
+| `area` | The entity's area, falling back to its device's area | The area name |
+| `domain` | The part of the entity id before the dot | The domain title, e.g. `binary_sensor` reads **Binary sensor** |
+
+`devices`, `platform`, `service`, `rooms` and the other obvious plurals are accepted as aliases. A value that is not one of these is a config error rather than a silently flat card.
+
+How it behaves:
+
+- Headings sort by name, and the leftover group (`No device`, `No area`, `No integration`) always sorts last. Rows keep their order inside a group.
+- The count on a heading is that group's own rows. The card's own count badge still reports the total.
+- Click a heading, or focus it and press <kbd>Enter</kbd>, to fold it. Folding survives Home Assistant's state updates and resets when you change the card's configuration.
+- While you are searching, every group is rendered open so a match is never hidden behind a fold, and groups with no match disappear. Your folds come back when the query is cleared.
+- Grouping reads the entity and device registries. If nothing can be resolved, the card renders a plain flat list rather than one pointless `No device` heading, so turning `group_by` on is never destructive. `domain` needs no registry at all.
+- A row showing `not available` no longer exists in Home Assistant, so it has no device, area or integration, and collects in the leftover group.
 
 ### `unavailable_states` options
 
@@ -339,13 +381,15 @@ The card accepts an empty entity list, so it renders its empty state rather than
 - **`labels:` or `areas:` match nothing:** check the name against **Settings → Areas & labels**.
 - **A row says `not available`:** the entity id does not exist. Check it against **Developer tools → States**, or remove it from `entities:`.
 - **Too much noise:** `device_tracker` entities and `*_last_seen` timestamps are legitimately `unknown` much of the time. Exclude them rather than living with them.
+- **`group_by: device` puts everything under `No device`:** those entities genuinely have no device, which is normal for helpers, template entities and integrations that register entities directly. If *every* row lands there the card falls back to a flat list.
+- **An integration heading reads `Zwave Js` rather than `Z-Wave JS`:** the card asks Home Assistant for the integration's name and falls back to prettifying the raw key when the frontend has no translation loaded for it. Reload the dashboard.
 - **Custom colors ignored:** each entry in an `unavailable_states` list needs its own `state` key alongside the style fields.
 
 ## Development
 
 - The distributed file is `unavailable-entity-card.js`. No build tooling requires, it is ready-to-serve JavaScript. Edit it and refresh your dashboard.
 - `test/index.html` is a dependency-free browser test suite. Open it in Chrome; it loads `../unavailable-entity-card.js` directly, so it always exercises the real card file.
-- `test/preview.html` renders the card in the configurations used for the screenshot above, and `test/capture-preview.sh` regenerates the image after a UI change.
+- `test/preview.html` renders the card in the configurations used for the screenshots above, and `test/capture-preview.sh` regenerates them after a UI change. It takes an optional size and case: `./test/capture-preview.sh 1000 795 --case=grouped` rewrites the grouping screenshot.
 
 ## License
 

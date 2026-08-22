@@ -8,6 +8,28 @@ const DEFAULT_UNAVAILABLE_STATES = new Set(["unavailable", "unknown"]);
 const DEFAULT_SEARCH_THRESHOLD = 20;
 const LABEL_REGISTRY_MESSAGE = "config/label_registry/list";
 
+const GROUP_NONE = "none";
+const GROUP_MODES = new Set([GROUP_NONE, "device", "integration", "area", "domain"]);
+const GROUP_ALIASES = {
+  devices: "device",
+  platform: "integration",
+  platforms: "integration",
+  service: "integration",
+  services: "integration",
+  integrations: "integration",
+  areas: "area",
+  room: "area",
+  rooms: "area",
+  domains: "domain"
+};
+const GROUP_FALLBACK_LABELS = {
+  device: "No device",
+  integration: "No integration",
+  area: "No area",
+  domain: "Other"
+};
+const UNGROUPED_KEY = "__ungrouped__";
+
 const HTML_ESCAPES = {
   "&": "&amp;",
   "<": "&lt;",
@@ -83,6 +105,31 @@ const globToRegExp = (glob) => {
     }
   }
   return new RegExp(`^${pattern}$`, "i");
+};
+
+const prettifyDomain = (value) =>
+  String(value)
+    .split(/[_-]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+
+const normalizeGroupBy = (value) => {
+  if (value === undefined || value === null) {
+    return GROUP_NONE;
+  }
+  if (typeof value !== "string") {
+    throw new Error(`group_by must be one of: ${[...GROUP_MODES].join(", ")}`);
+  }
+  const key = value.trim().toLowerCase();
+  if (!key) {
+    return GROUP_NONE;
+  }
+  const resolved = GROUP_ALIASES[key] || key;
+  if (!GROUP_MODES.has(resolved)) {
+    throw new Error(`Unknown group_by "${value}". Use one of: ${[...GROUP_MODES].join(", ")}`);
+  }
+  return resolved;
 };
 
 const buildFilter = (section) => {
@@ -315,6 +362,66 @@ const CARD_STYLES = `
     color: var(--secondary-text-color);
   }
 
+  .entity-groups {
+    display: grid;
+  }
+
+  .entity-group {
+    display: grid;
+  }
+
+  .group-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 8px 2px;
+    cursor: pointer;
+    user-select: none;
+    border-radius: var(--ha-card-border-radius, 12px);
+  }
+
+  .group-header:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: -2px;
+  }
+
+  .group-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .group-count {
+    flex: 0 0 auto;
+    background: rgba(var(--rgb-primary-text-color, 33, 33, 33), 0.08);
+    color: var(--secondary-text-color);
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 1px 8px;
+    border-radius: 999px;
+  }
+
+  .group-icon {
+    flex: 0 0 auto;
+    margin-left: auto;
+    --mdc-icon-size: 20px;
+    color: var(--secondary-text-color);
+    transition: transform 180ms ease;
+  }
+
+  .entity-group.collapsed .group-icon {
+    transform: rotate(-90deg);
+  }
+
+  .entity-group .entity-list {
+    margin-top: 6px;
+  }
+
   .empty-state {
     display: grid;
     place-items: center;
@@ -338,7 +445,8 @@ const CARD_STYLES = `
 
   @media (prefers-reduced-motion: reduce) {
     .entity-tile,
-    .collapse-icon {
+    .collapse-icon,
+    .group-icon {
       transition: none;
     }
   }
@@ -396,6 +504,9 @@ class UnavailableEntityCard extends HTMLElement {
     this._labelNames = new Map();
     this._labelsRequested = false;
     this._query = "";
+    this._groupBy = GROUP_NONE;
+    this._groupState = new Map();
+    this._groupsExpandedByDefault = true;
 
     this._handleClick = this._handleClick.bind(this);
     this._handleKeydown = this._handleKeydown.bind(this);
@@ -441,6 +552,10 @@ class UnavailableEntityCard extends HTMLElement {
         return entry;
       })
       .filter((entry) => entry && typeof entry.entity === "string" && entry.entity !== "");
+
+    this._groupBy = normalizeGroupBy(config.group_by);
+    this._groupsExpandedByDefault = config.groups_expanded !== false;
+    this._groupState = new Map();
 
     this._include = buildFilter(config.include);
     this._exclude = buildFilter(config.exclude);
@@ -497,8 +612,16 @@ class UnavailableEntityCard extends HTMLElement {
     }
     const headerRows = this._config && this._config.show_header === false ? 0 : 1;
     const searchRows = this._searchEnabled() ? 1 : 0;
-    const entityRows = this._visibleEntities().length || 1;
-    return Math.max(1, headerRows + searchRows + entityRows);
+    const visible = this._visibleEntities();
+    const groups = this._buildGroups(visible);
+    const groupRows = groups ? groups.length : 0;
+    const entityRows = groups
+      ? groups.reduce(
+          (total, group) => total + (this._isGroupCollapsed(group.key) ? 0 : group.entities.length),
+          0
+        ) || 1
+      : visible.length || 1;
+    return Math.max(1, headerRows + searchRows + groupRows + entityRows);
   }
 
   getGridOptions() {
@@ -529,7 +652,8 @@ class UnavailableEntityCard extends HTMLElement {
           state: MISSING_STATE,
           icon: entry.icon,
           picture: undefined,
-          missing: true
+          missing: true,
+          group: this._resolveGroup(entry.entity)
         });
         continue;
       }
@@ -587,7 +711,8 @@ class UnavailableEntityCard extends HTMLElement {
       state: entity.state,
       icon,
       picture,
-      missing: false
+      missing: false,
+      group: this._resolveGroup(entity.entity_id)
     };
   }
 
@@ -691,6 +816,155 @@ class UnavailableEntityCard extends HTMLElement {
       Array.isArray(area.aliases) &&
       area.aliases.some((alias) => typeof alias === "string" && targets.has(alias.toLowerCase()))
     );
+  }
+
+  _integrationName(domain) {
+    const hass = this._hass;
+    if (hass && typeof hass.localize === "function") {
+      let localized;
+      try {
+        localized = hass.localize(`component.${domain}.title`);
+      } catch (error) {
+        localized = undefined;
+      }
+      if (typeof localized === "string" && localized.trim() !== "") {
+        return localized;
+      }
+    }
+    return prettifyDomain(domain);
+  }
+
+  _fallbackGroup() {
+    return {
+      key: UNGROUPED_KEY,
+      name: GROUP_FALLBACK_LABELS[this._groupBy] || "Other",
+      fallback: true
+    };
+  }
+
+  _resolveGroup(entityId) {
+    if (this._groupBy === GROUP_NONE || !this._hass) {
+      return undefined;
+    }
+
+    if (this._groupBy === "domain") {
+      const separator = entityId.indexOf(".");
+      const domain = separator === -1 ? "" : entityId.slice(0, separator);
+      return domain
+        ? { key: `domain:${domain}`, name: this._integrationName(domain) }
+        : this._fallbackGroup();
+    }
+
+    const entry = this._registryEntry(entityId);
+    const deviceId = entry && typeof entry.device_id === "string" ? entry.device_id : undefined;
+    const device = deviceId && this._hass.devices ? this._hass.devices[deviceId] : undefined;
+
+    if (this._groupBy === "device") {
+      if (!deviceId) {
+        return this._fallbackGroup();
+      }
+      const name = device ? device.name_by_user || device.name : undefined;
+      return { key: `device:${deviceId}`, name: name || deviceId };
+    }
+
+    if (this._groupBy === "integration") {
+      const platform = entry && typeof entry.platform === "string" ? entry.platform.trim() : "";
+      return platform
+        ? { key: `integration:${platform}`, name: this._integrationName(platform) }
+        : this._fallbackGroup();
+    }
+
+    const areaId = (entry && entry.area_id) || (device ? device.area_id : undefined);
+    if (!areaId) {
+      return this._fallbackGroup();
+    }
+    const area = this._hass.areas ? this._hass.areas[areaId] : undefined;
+    const name = area && typeof area.name === "string" && area.name.trim() !== "" ? area.name : undefined;
+    return { key: `area:${areaId}`, name: name || String(areaId) };
+  }
+
+  _buildGroups(entities) {
+    if (this._groupBy === GROUP_NONE || entities.length === 0) {
+      return undefined;
+    }
+
+    const buckets = new Map();
+    for (const entity of entities) {
+      const group = entity.group || this._fallbackGroup();
+      let bucket = buckets.get(group.key);
+      if (!bucket) {
+        bucket = {
+          key: group.key,
+          name: group.name,
+          fallback: group.fallback === true,
+          entities: []
+        };
+        buckets.set(group.key, bucket);
+      }
+      bucket.entities.push(entity);
+    }
+
+    const groups = [...buckets.values()];
+    if (groups.every((group) => group.fallback)) {
+      return undefined;
+    }
+
+    groups.sort(
+      (a, b) =>
+        Number(a.fallback) - Number(b.fallback) ||
+        a.name.localeCompare(b.name) ||
+        a.key.localeCompare(b.key)
+    );
+
+    return groups;
+  }
+
+  _isSearching() {
+    return this._searchEnabled() && this._query.trim() !== "";
+  }
+
+  _storedGroupCollapsed(key) {
+    if (this._groupState.has(key)) {
+      return this._groupState.get(key);
+    }
+    return !this._groupsExpandedByDefault;
+  }
+
+  _isGroupCollapsed(key) {
+    // A query has to be able to reach matches inside a folded group, so every
+    // group renders open while searching. The stored state is left untouched.
+    if (this._isSearching()) {
+      return false;
+    }
+    return this._storedGroupCollapsed(key);
+  }
+
+  _toggleGroup(key) {
+    if (!key) {
+      return;
+    }
+
+    const root = this.shadowRoot;
+    const active = root ? root.activeElement : undefined;
+    const keepFocus = !!(
+      active &&
+      typeof active.getAttribute === "function" &&
+      active.getAttribute("data-group") === key
+    );
+
+    this._groupState.set(key, !this._storedGroupCollapsed(key));
+    this._render(true);
+
+    // The body is re-rendered wholesale, so a keyboard toggle has to be handed
+    // its heading back or the focus ring lands nowhere.
+    if (keepFocus && root) {
+      for (const header of root.querySelectorAll(".group-header[data-group]")) {
+        if (header.getAttribute("data-group") === key && typeof header.focus === "function") {
+          header.focus();
+          break;
+        }
+      }
+    }
   }
 
   _ensureLabelNames() {
@@ -881,13 +1155,22 @@ class UnavailableEntityCard extends HTMLElement {
       this._config.title ?? DEFAULT_TITLE,
       this._searchEnabled(),
       this._searchEnabled() ? this._query.trim().toLowerCase() : "",
+      this._groupBy,
+      this._groupBy === GROUP_NONE
+        ? ""
+        : [...this._groupState.entries()]
+            .sort((a, b) => a[0].localeCompare(b[0]))
+            .map(([key, collapsed]) => `${key}:${collapsed ? 1 : 0}`)
+            .join("|"),
       this._entities.map((entity) => [
         entity.id,
         entity.name,
         entity.state,
         entity.icon || "",
         entity.picture || "",
-        entity.missing
+        entity.missing,
+        entity.group ? entity.group.key : "",
+        entity.group ? entity.group.name : ""
       ])
     ]);
   }
@@ -1020,8 +1303,15 @@ class UnavailableEntityCard extends HTMLElement {
     }
 
     const visible = this._visibleEntities();
-    this._body.innerHTML =
-      visible.length > 0 ? this._renderEntities(visible) : this._renderNoMatchState();
+    if (visible.length === 0) {
+      this._body.innerHTML = this._renderNoMatchState();
+      return;
+    }
+
+    const groups = this._buildGroups(visible);
+    this._body.innerHTML = groups
+      ? this._renderGroups(groups)
+      : this._renderEntities(visible);
   }
 
   _renderEntities(entities) {
@@ -1051,6 +1341,40 @@ class UnavailableEntityCard extends HTMLElement {
     return `
       <div class="entity-list" role="list">
         ${items}
+      </div>
+    `;
+  }
+
+  _renderGroups(groups) {
+    const interactive = !this._isSearching();
+
+    const sections = groups
+      .map((group) => {
+        const collapsed = this._isGroupCollapsed(group.key);
+        const headerAttributes = interactive
+          ? ` role="button" tabindex="0" aria-expanded="${collapsed ? "false" : "true"}"` +
+            ` data-group="${escapeHtml(group.key)}"`
+          : "";
+        const chevron = interactive
+          ? '<ha-icon class="group-icon" icon="mdi:chevron-down"></ha-icon>'
+          : "";
+
+        return `
+          <section class="entity-group${collapsed ? " collapsed" : ""}">
+            <div class="group-header"${headerAttributes}>
+              <span class="group-title">${escapeHtml(group.name)}</span>
+              <span class="group-count">${group.entities.length}</span>
+              ${chevron}
+            </div>
+            ${collapsed ? "" : this._renderEntities(group.entities)}
+          </section>
+        `;
+      })
+      .join("");
+
+    return `
+      <div class="entity-groups">
+        ${sections}
       </div>
     `;
   }
@@ -1104,6 +1428,12 @@ class UnavailableEntityCard extends HTMLElement {
       return;
     }
 
+    const groupHeader = target.closest(".group-header[data-group]");
+    if (groupHeader) {
+      this._toggleGroup(groupHeader.getAttribute("data-group"));
+      return;
+    }
+
     const tile = target.closest(".entity-tile.interactive");
     if (tile) {
       this._openMoreInfo(tile.getAttribute("data-entity"));
@@ -1123,6 +1453,13 @@ class UnavailableEntityCard extends HTMLElement {
     if (this._header && target.closest(".card-header")) {
       event.preventDefault();
       this._toggle();
+      return;
+    }
+
+    const groupHeader = target.closest(".group-header[data-group]");
+    if (groupHeader) {
+      event.preventDefault();
+      this._toggleGroup(groupHeader.getAttribute("data-group"));
       return;
     }
 
