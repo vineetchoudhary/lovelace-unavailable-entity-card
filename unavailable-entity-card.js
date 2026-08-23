@@ -132,8 +132,19 @@ const normalizeGroupBy = (value) => {
   return resolved;
 };
 
+const isFilterSection = (section) =>
+  !!section && typeof section === "object" && !Array.isArray(section);
+
+const buildStateFilter = (section) => {
+  if (!isFilterSection(section)) {
+    return undefined;
+  }
+  const states = toLowerSet(section.states);
+  return states.size ? states : undefined;
+};
+
 const buildFilter = (section) => {
-  if (!section || typeof section !== "object" || Array.isArray(section)) {
+  if (!isFilterSection(section)) {
     return undefined;
   }
 
@@ -498,6 +509,7 @@ class UnavailableEntityCard extends HTMLElement {
 
     this._include = undefined;
     this._exclude = undefined;
+    this._excludedStates = undefined;
     this._discover = false;
     this._includeHidden = false;
     this._needsLabels = false;
@@ -557,8 +569,13 @@ class UnavailableEntityCard extends HTMLElement {
     this._groupsExpandedByDefault = config.groups_expanded !== false;
     this._groupState = new Map();
 
+    if (buildStateFilter(config.include)) {
+      throw new Error("states is only supported inside exclude, not include");
+    }
+
     this._include = buildFilter(config.include);
     this._exclude = buildFilter(config.exclude);
+    this._excludedStates = buildStateFilter(config.exclude);
     this._discover = config.all_entities === true || this._include !== undefined;
     this._includeHidden = config.include_hidden === true;
 
@@ -1074,6 +1091,19 @@ class UnavailableEntityCard extends HTMLElement {
       });
     }
 
+    if (this._excludedStates) {
+      for (const state of [...states]) {
+        if (this._excludedStates.has(state.toLowerCase())) {
+          states.delete(state);
+          colors.delete(state);
+        }
+      }
+
+      if (states.size === 0) {
+        throw new Error("exclude.states leaves no state for this card to report");
+      }
+    }
+
     return { states, colors };
   }
 
@@ -1398,10 +1428,16 @@ class UnavailableEntityCard extends HTMLElement {
   }
 
   _renderEmptyState() {
+    const watched = [...this._unavailableStates];
+    const list =
+      watched.length > 1
+        ? `${watched.slice(0, -1).join(", ")} or ${watched[watched.length - 1]}`
+        : watched[0] || "monitored";
+
     return `
       <div class="empty-state">
         <strong>All monitored entities look good!</strong>
-        <span>No entities are currently reporting unavailable or unknown states.</span>
+        <span>No entities are currently reporting ${escapeHtml(list)} states.</span>
       </div>
     `;
   }

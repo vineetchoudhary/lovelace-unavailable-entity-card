@@ -23,6 +23,7 @@ A Lovelace card that surfaces the entities Home Assistant has quietly lost. Poin
   - [Card options](#card-options)
   - [Entity options](#entity-options)
   - [`include` / `exclude` selectors](#include--exclude-selectors)
+  - [Excluding a state](#excluding-a-state)
   - [`group_by` options](#group_by-options)
   - [`unavailable_states` options](#unavailable_states-options)
 - [Using auto-entities](#using-auto-entities)
@@ -109,7 +110,7 @@ exclude:
   domains: [device_tracker]   # away phones are legitimately unknown
 ```
 
-`device_tracker` and "last seen" timestamps are the usual sources of permanent noise, excluding them is what turns this card from a long list into a card you actually trust.
+`device_tracker` and "last seen" timestamps are the usual sources of permanent noise, excluding them is what turns this card from a long list into a card you actually trust. If `unknown` is noisy across the board rather than in a few places, drop the state itself with `exclude: states: [unknown]`.
 
 ### Dead batteries only
 
@@ -251,7 +252,7 @@ cards:
 | `entities` | Conditional | — | Entities to monitor, as ids or [objects](#entity-options). Required unless `all_entities` or an `include` key is set |
 | `all_entities` | Conditional | `false` | Watch every entity in Home Assistant. Required unless you set `entities` or `include` |
 | `include` | No | — | Narrow the automatic search — see [selectors](#include--exclude-selectors). Setting any key enables scanning |
-| `exclude` | No | — | Remove automatically found entities. Same keys as `include`, and it wins over `include` |
+| `exclude` | No | — | Remove automatically found entities. Same keys as `include`, and it wins over `include`. Also takes `states` to stop reporting a state such as `unknown` — see [excluding a state](#excluding-a-state) |
 | `include_hidden` | No | `false` | Include entities hidden in the Home Assistant entity registry |
 | `title` | No | `Unavailable entities` | Card header text |
 | `show_header` | No | `true` | `false` drops the header, count badge and collapse control |
@@ -283,6 +284,7 @@ Every key accepts a single value or a list, and matching is case-insensitive.
 | `entity_globs` | Wildcard patterns over the entity id, same syntax as Home Assistant's own `entity_globs`: `*` for any run of characters, `?` for exactly one |
 | `labels` | A label's name or its underlying label id. Matches the entity's own labels **and** those of its device |
 | `areas` | An area's name, one of its aliases, or its area id. Uses the entity's area, falling back to its device's area |
+| `states` | **`exclude` only.** States the card should stop reporting — see [excluding a state](#excluding-a-state) |
 
 ```yaml
 include:
@@ -294,7 +296,31 @@ include:
 exclude:
   entity_globs: "*_last_seen"
   labels: [Ignore]
+  states: [unknown]
 ```
+
+### Excluding a state
+
+`unavailable` and `unknown` are both reported by default. If you want to exlcude any of these states, list it under `exclude: states:` and the card stops reporting it entirely.
+
+```yaml
+type: custom:unavailable-entity-card
+title: Unavailable entities
+all_entities: true
+exclude:
+  states: [unknown]     # only genuinely unavailable entities are listed
+```
+
+- Matching is case-insensitive, and a single value works without a list.
+- It applies to any state the card watches, including the ones you added with `unavailable_states`.
+- Unlike the other `exclude` keys, this one also applies to entities you listed explicitly under `entities:` — an entity in an excluded state is not reported no matter how it got onto the card.
+- Excluding every state the card watches is a config error rather than a card that can never show anything. To watch only your own states, exclude both defaults and add yours:
+
+  ```yaml
+  unavailable_states: [offline]
+  exclude:
+    states: [unavailable, unknown]
+  ```
 
 ### `group_by` options
 
@@ -319,7 +345,7 @@ How it behaves:
 
 ### `unavailable_states` options
 
-`unavailable` and `unknown` are always treated as unavailable. This option adds more, and optionally styles their badge. Three forms are accepted:
+`unavailable` and `unknown` are treated as unavailable unless you turn one off with [`exclude: states:`](#excluding-a-state). This option adds more, and optionally styles their badge. Three forms are accepted:
 
 ```yaml
 # 1. A single state
@@ -377,10 +403,10 @@ The card accepts an empty entity list, so it renders its empty state rather than
 
 - **Custom card not found:** check the resource URL is registered (`/hacsfiles/…` for HACS, `/local/…` for a manual install) and hard-refresh the browser.
 - **The card is empty:** that is the good outcome that means nothing is unavailable. Confirm it is working by temporarily adding a state you do have, e.g. `unavailable_states: 'on'`.
-- **An entity I expected is missing:** it may be `hidden` (set `include_hidden: true`), `disabled` (Home Assistant never exposes those), or excluded by an `exclude` key.
+- **An entity I expected is missing:** it may be `hidden` (set `include_hidden: true`), `disabled` (Home Assistant never exposes those), excluded by an `exclude` key, or in a state you turned off with `exclude: states:`.
 - **`labels:` or `areas:` match nothing:** check the name against **Settings → Areas & labels**.
 - **A row says `not available`:** the entity id does not exist. Check it against **Developer tools → States**, or remove it from `entities:`.
-- **Too much noise:** `device_tracker` entities and `*_last_seen` timestamps are legitimately `unknown` much of the time. Exclude them rather than living with them.
+- **Too much noise:** `device_tracker` entities and `*_last_seen` timestamps are legitimately `unknown` much of the time. Exclude them rather than living with them, or drop the whole state with `exclude: states: [unknown]`.
 - **`group_by: device` puts everything under `No device`:** those entities genuinely have no device, which is normal for helpers, template entities and integrations that register entities directly. If *every* row lands there the card falls back to a flat list.
 - **An integration heading reads `Zwave Js` rather than `Z-Wave JS`:** the card asks Home Assistant for the integration's name and falls back to prettifying the raw key when the frontend has no translation loaded for it. Reload the dashboard.
 - **Custom colors ignored:** each entry in an `unavailable_states` list needs its own `state` key alongside the style fields.

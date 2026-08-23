@@ -1406,6 +1406,76 @@
     return el.shadowRoot.querySelectorAll(".entity-group.collapsed").length;
   })(), 0);
 
+  /* ================================================================== *
+   * 20. Excluding states
+   * ================================================================== */
+  section("20. Excluding states");
+
+  eq("unknown is watched by default",
+     ids(discover({ all_entities: true })).indexOf("sensor.b_battery") !== -1, true);
+  eq("exclude.states drops unknown entities",
+     ids(discover({ all_entities: true, exclude: { states: ["unknown"] } })).join(","),
+     "sensor.a_battery,sensor.c_temp,binary_sensor.dev_area,light.hall,sensor.via_device");
+  eq("exclude.states drops unavailable entities",
+     ids(discover({ all_entities: true, exclude: { states: ["unavailable"] } })).join(","),
+     "sensor.b_battery");
+  eq("state matching is case-insensitive",
+     ids(discover({ all_entities: true, exclude: { states: ["UNKNOWN"] } })).indexOf("sensor.b_battery"), -1);
+  eq("a scalar state is accepted",
+     ids(discover({ all_entities: true, exclude: { states: "unknown" } })).indexOf("sensor.b_battery"), -1);
+
+  eq("states combine with the other exclude keys in the same block",
+     ids(discover({ all_entities: true, exclude: { states: ["unknown"], labels: ["noisy"] } })).join(","),
+     "sensor.a_battery,binary_sensor.dev_area,light.hall,sensor.via_device");
+
+  eq("an excluded state also hides explicitly listed entities",
+     ids(discover({ entities: ["sensor.b_battery"], exclude: { states: ["unknown"] } })).length, 0);
+  eq("explicitly listed entities in a watched state are untouched",
+     ids(discover({ entities: ["sensor.a_battery"], exclude: { states: ["unknown"] } })).join(","),
+     "sensor.a_battery");
+  eq("exclude.states alone does not turn on discovery",
+     ids(discover({ entities: ["sensor.a_battery"], exclude: { states: ["unknown"] } })).length, 1);
+
+  eq("a custom state survives excluding both defaults",
+     throws({ type: "x", all_entities: true, unavailable_states: ["offline"],
+              exclude: { states: ["unavailable", "unknown"] } }), false);
+  eq("and only that custom state is reported",
+     ids(discover({ all_entities: true, unavailable_states: ["offline"],
+                    exclude: { states: ["unavailable", "unknown"] } })).length, 0);
+  eq("excluding a custom state removes it again",
+     ids(discover({ all_entities: true, unavailable_states: ["unavailable", "offline"],
+                    exclude: { states: ["offline"] } })).length, 6);
+
+  eq("excluding every watched state throws rather than rendering a dead card",
+     throws({ type: "x", all_entities: true, exclude: { states: ["unavailable", "unknown"] } }), true);
+  eq("the error explains why", (function () {
+    try { document.createElement("unavailable-entity-card")
+      .setConfig({ type: "x", all_entities: true, exclude: { states: ["unavailable", "unknown"] } }); return ""; }
+    catch (e) { return /exclude\.states/.test(e.message); }
+  })(), true);
+  eq("states in include throws instead of being silently ignored",
+     throws({ type: "x", all_entities: true, include: { states: ["unknown"] } }), true);
+  eq("an empty states list changes nothing",
+     ids(discover({ all_entities: true, exclude: { states: [] } })).length, 6);
+
+  var quietHass = { states: { "switch.fine": mk("switch.fine", "on", { friendly_name: "Fine" }) } };
+  var quiet = document.createElement("unavailable-entity-card");
+  quiet.setConfig({ type: "custom:unavailable-entity-card", all_entities: true,
+                    exclude: { states: ["unknown"] } });
+  sandbox.appendChild(quiet);
+  quiet.hass = quietHass;
+  eq("the empty state names only the states still watched",
+     quiet.shadowRoot.querySelector(".empty-state span").textContent.trim(),
+     "No entities are currently reporting unavailable states.");
+
+  var quietDefault = document.createElement("unavailable-entity-card");
+  quietDefault.setConfig({ type: "custom:unavailable-entity-card", all_entities: true });
+  sandbox.appendChild(quietDefault);
+  quietDefault.hass = quietHass;
+  eq("the default empty state still names both",
+     quietDefault.shadowRoot.querySelector(".empty-state span").textContent.trim(),
+     "No entities are currently reporting unavailable or unknown states.");
+
   /* ------------------------------------------------------------------ *
    * report
    * ------------------------------------------------------------------ */
