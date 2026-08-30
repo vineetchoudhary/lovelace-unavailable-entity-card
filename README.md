@@ -17,6 +17,7 @@ A Lovelace card that surfaces the entities Home Assistant has quietly lost. Poin
   - [A hand-picked watchlist](#a-hand-picked-watchlist)
   - [Custom states from an integration](#custom-states-from-an-integration)
   - [Grouped by device, integration or area](#grouped-by-device-integration-or-area)
+  - [One line per dead device](#one-line-per-dead-device)
   - [Compact badge for a header row](#compact-badge-for-a-header-row)
   - [One card per floor](#one-card-per-floor)
 - [Configuration reference](#configuration-reference)
@@ -25,6 +26,7 @@ A Lovelace card that surfaces the entities Home Assistant has quietly lost. Poin
   - [`include` / `exclude` selectors](#include--exclude-selectors)
   - [Excluding a state](#excluding-a-state)
   - [`group_by` options](#group_by-options)
+  - [`groups_expanded` options](#groups_expanded-options)
   - [`unavailable_states` options](#unavailable_states-options)
 - [Using auto-entities](#using-auto-entities)
 - [Troubleshooting](#troubleshooting)
@@ -39,6 +41,7 @@ A Lovelace card that surfaces the entities Home Assistant has quietly lost. Poin
 - Flags entities that no longer exist in Home Assistant at all as `not available`
 - Custom states are yours to define: `offline`, `error`, `idle` with per-state badge colors
 - Groups rows by device, integration, area or domain, so one dead device reads as one foldable heading
+- Folds a device into a single line when all its entities are unavailable, since its name tells the whole story.
 - Search box appears automatically once the list gets long
 - Tapping a row opens the standard more-info dialog
 - Theme-aware, responsive, and available from the card picker with a live preview
@@ -210,6 +213,22 @@ group_by: integration
 groups_expanded: false     # start with every heading folded
 ```
 
+### One line per dead device
+
+When a device becomes unavailable, it folds into a single line because all of its entities become unavailable. groups_expanded: partial folds only those headings where every entity the card watches is unavailable, while leaving partially broken ones open.
+
+![One line per dead device, light and dark](screenshots/screenshot-partial.png)
+
+```yaml
+type: custom:unavailable-entity-card
+title: Unavailable by device
+all_entities: true
+group_by: device
+groups_expanded: partial
+```
+
+It works the same for the other groupings: `group_by: integration` with `groups_expanded: partial` gives you one line per integration that has gone dark, which is usually the whole story.
+
 ### Compact badge for a header row
 
 With `show_header: false` the card is just the list, which makes it a good citizen inside a `vertical-stack` or a grid where a heading already exists.
@@ -258,7 +277,7 @@ cards:
 | `show_header` | No | `true` | `false` drops the header, count badge and collapse control |
 | `expanded` | No | `true` | `false` starts the card collapsed |
 | `group_by` | No | `none` | Group rows under foldable headings, by `device`, `integration`, `area` or `domain` — see [options](#group_by-options) |
-| `groups_expanded` | No | `true` | `false` starts every group folded |
+| `groups_expanded` | No | `true` | Which groups start open — `false` folds all of them, `partial` folds only the ones with nothing left alive. See [options](#groups_expanded-options) |
 | `search` | No | *(automatic)* | Force the search box on or off, regardless of list length |
 | `search_threshold` | No | `20` | How many entities must be listed before the search box appears on its own |
 | `unavailable_states` | No | `[unavailable, unknown]` | Extra states to treat as unavailable, with optional colors — see [options](#unavailable_states-options) |
@@ -338,10 +357,22 @@ How it behaves:
 
 - Headings sort by name, and the leftover group (`No device`, `No area`, `No integration`) always sorts last. Rows keep their order inside a group.
 - The count on a heading is that group's own rows. The card's own count badge still reports the total.
-- Click a heading, or focus it and press <kbd>Enter</kbd>, to fold it. Folding survives Home Assistant's state updates and resets when you change the card's configuration.
+- Click a heading, or focus it and press <kbd>Enter</kbd>, to fold it. Folding survives Home Assistant's state updates and resets when you change the card's configuration. [`groups_expanded`](#groups_expanded-options) picks which groups start folded.
 - While you are searching, every group is rendered open so a match is never hidden behind a fold, and groups with no match disappear. Your folds come back when the query is cleared.
 - Grouping reads the entity and device registries. If nothing can be resolved, the card renders a plain flat list rather than one pointless `No device` heading, so turning `group_by` on is never destructive. `domain` needs no registry at all.
 - A row showing `not available` no longer exists in Home Assistant, so it has no device, area or integration, and collects in the leftover group.
+
+### `groups_expanded` options
+
+Which headings start folded. Only meaningful alongside [`group_by`](#group_by-options).
+
+| Value | Starts folded |
+| --- | --- |
+| `true` | *(default)* nothing — every group is open |
+| `false` | Every group |
+| `partial` | Only the groups where every entity the card watches is unavailable |
+
+`all` and `none` are accepted as aliases for `true` and `false`. Anything else is a config error.
 
 ### `unavailable_states` options
 
@@ -408,6 +439,7 @@ The card accepts an empty entity list, so it renders its empty state rather than
 - **A row says `not available`:** the entity id does not exist. Check it against **Developer tools → States**, or remove it from `entities:`.
 - **Too much noise:** `device_tracker` entities and `*_last_seen` timestamps are legitimately `unknown` much of the time. Exclude them rather than living with them, or drop the whole state with `exclude: states: [unknown]`.
 - **`group_by: device` puts everything under `No device`:** those entities genuinely have no device, which is normal for helpers, template entities and integrations that register entities directly. If *every* row lands there the card falls back to a flat list.
+- **`groups_expanded: partial` folds nothing:** every group still has a working entity in it, as the card sees it. Check what the card is watching — an `include` or `exclude` that already drops a device's healthy entities makes the rest of it look like a total outage, and one that drops its broken ones does the reverse.
 - **An integration heading reads `Zwave Js` rather than `Z-Wave JS`:** the card asks Home Assistant for the integration's name and falls back to prettifying the raw key when the frontend has no translation loaded for it. Reload the dashboard.
 - **Custom colors ignored:** each entry in an `unavailable_states` list needs its own `state` key alongside the style fields.
 

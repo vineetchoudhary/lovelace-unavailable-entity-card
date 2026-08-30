@@ -1296,6 +1296,176 @@
   eq("one group can be opened from there",
      startCollapsed.shadowRoot.querySelectorAll(".entity-tile").length, 2);
 
+  /* --- groups_expanded: partial ------------------------------------- *
+   * dev_hall and dev_blank each own a single entity and it is down, so
+   * both are total outages. dev_kitchen also owns switch.healthy, which
+   * is fine, so it is only partly broken.                              */
+  var groupState = function (el, name) {
+    var found = sectionFor(el, name);
+    if (!found) return null;
+    var badge = found.querySelector(".group-state");
+    return badge ? badge.textContent : null;
+  };
+  var isFolded = function (el, name) {
+    var found = sectionFor(el, name);
+    return found ? found.classList.contains("collapsed") : null;
+  };
+
+  var partial = grouped({ group_by: "device", groups_expanded: "partial" });
+  eq("a device with every watched entity down starts folded",
+     isFolded(partial, "Hallway Motion"), true);
+  eq("so does the next one", isFolded(partial, "dev_blank"), true);
+  eq("a device that still has a healthy entity stays open",
+     isFolded(partial, "Kitchen Multisensor"), false);
+  eq("and keeps its rows on show", groupIds(partial, "Kitchen Multisensor").length, 2);
+  eq("only the total outages are folded",
+     partial.shadowRoot.querySelectorAll(".entity-group.collapsed").length, 2);
+  eq("the leftover group is never treated as a total outage",
+     isFolded(partial, "No device"), false);
+
+  eq("a folded outage names the state its entities share",
+     groupState(partial, "Hallway Motion"), "unknown");
+  eq("the state is the group's own, not a fixed word",
+     groupState(partial, "dev_blank"), "unavailable");
+  eq("a partly broken device carries no state badge",
+     groupState(partial, "Kitchen Multisensor"), null);
+  eq("nor does the leftover group", groupState(partial, "No device"), null);
+  eq("a total outage is marked for styling",
+     sectionFor(partial, "Hallway Motion").classList.contains("complete"), true);
+  eq("a folded outage still shows its count",
+     sectionFor(partial, "Hallway Motion").querySelector(".group-count").textContent, "1");
+  eq("getCardSize skips the rows a folded outage hides", partial.getCardSize(), 9);
+
+  sectionFor(partial, "Hallway Motion").querySelector(".group-header").click();
+  eq("a folded outage can still be opened by hand",
+     groupIds(partial, "Hallway Motion").join(","), "binary_sensor.hall_motion");
+  eq("and keeps its badge once open", groupState(partial, "Hallway Motion"), "unknown");
+
+  /* zwave_js lost hall_motion to unknown and nameless_probe to unavailable */
+  var partialIntegration = grouped({ group_by: "integration", groups_expanded: "partial" });
+  eq("an integration with nothing left alive folds",
+     isFolded(partialIntegration, "Zwave Js"), true);
+  eq("a mixed outage lists every state rather than picking one",
+     groupState(partialIntegration, "Zwave Js"), "unknown, unavailable");
+  eq("an integration that still has a healthy entity stays open",
+     isFolded(partialIntegration, "Mqtt"), false);
+  eq("a one-entity integration that is down folds", isFolded(partialIntegration, "Hue"), true);
+
+  var partialArea = grouped({ group_by: "area", groups_expanded: "partial" });
+  eq("an area with a working entity stays open", isFolded(partialArea, "Kitchen"), false);
+  eq("an area with nothing alive folds", isFolded(partialArea, "Hallway"), true);
+
+  /* switch.healthy is the only switch, and it is fine, so no switch group */
+  var partialDomain = grouped({ group_by: "domain", groups_expanded: "partial" });
+  eq("every domain on show here has lost all of its entities",
+     partialDomain.shadowRoot.querySelectorAll(".entity-group.collapsed").length, 3);
+  eq("domain grouping needs no registry to spot a total outage",
+     groupState(grouped({ group_by: "domain", groups_expanded: "partial" }, { states: groupStates }),
+                "Sensor"),
+     "unavailable");
+
+  /* A silenced state still counts against a total outage: switch.healthy is
+     the only reason dev_kitchen stays open, and silencing unknown does not
+     hand dev_hall's one entity back either. */
+  var silenced = grouped({
+    group_by: "device",
+    groups_expanded: "partial",
+    exclude: { states: ["unknown"] }
+  });
+  eq("silencing a state does not invent a total outage",
+     isFolded(silenced, "Kitchen Multisensor"), false);
+  eq("a group whose only entity is in a silenced state is not on the card at all",
+     sectionFor(silenced, "Hallway Motion"), undefined);
+  eq("the groups that really are gone still fold", isFolded(silenced, "dev_blank"), true);
+
+  var hidden = grouped({ group_by: "device", groups_expanded: "partial" }, Object.assign({}, groupHass, {
+    entities: Object.assign({}, groupHass.entities, {
+      "switch.healthy": { entity_id: "switch.healthy", labels: [], device_id: "dev_kitchen",
+                          platform: "mqtt", hidden: true }
+    })
+  }));
+  eq("an entity the card is not watching cannot hold a heading open",
+     isFolded(hidden, "Kitchen Multisensor"), true);
+
+  var listPartial = grouped({
+    group_by: "device",
+    groups_expanded: "partial",
+    all_entities: false,
+    entities: ["sensor.kitchen_temp", "sensor.kitchen_humidity"]
+  });
+  eq("an outage is judged against what the card watches, not the whole device",
+     isFolded(listPartial, "Kitchen Multisensor"), true);
+
+  var flipping = grouped({ group_by: "device", groups_expanded: "partial" });
+  eq("a partly broken device is open to start",
+     isFolded(flipping, "Kitchen Multisensor"), false);
+  flipping.hass = Object.assign({}, groupHass, {
+    states: Object.assign({}, groupStates, {
+      "switch.healthy": mk("switch.healthy", "unavailable", { friendly_name: "Healthy" })
+    })
+  });
+  eq("it folds as soon as its last working entity goes down",
+     isFolded(flipping, "Kitchen Multisensor"), true);
+  eq("and picks up the badge on the same tick",
+     groupState(flipping, "Kitchen Multisensor"), "unavailable");
+  eq("the badge counts every row it is hiding",
+     sectionFor(flipping, "Kitchen Multisensor").querySelector(".group-count").textContent, "3");
+
+  var folded = grouped({ group_by: "device", groups_expanded: false });
+  eq("groups_expanded: false marks the total outages too",
+     groupState(folded, "Hallway Motion"), "unknown");
+  eq("so a folded partial group still reads differently",
+     groupState(folded, "Kitchen Multisensor"), null);
+
+  eq("groups left expanded carry no badge to clutter them",
+     byDevice.shadowRoot.querySelectorAll(".group-state").length, 0);
+  eq("nor does an explicit groups_expanded: true",
+     grouped({ group_by: "device", groups_expanded: true })
+       .shadowRoot.querySelectorAll(".group-state").length, 0);
+
+  eq("all is a synonym for true",
+     grouped({ group_by: "device", groups_expanded: "all" })
+       .shadowRoot.querySelectorAll(".entity-group.collapsed").length, 0);
+  eq("none is a synonym for false",
+     grouped({ group_by: "device", groups_expanded: "none" })
+       .shadowRoot.querySelectorAll(".entity-group.collapsed").length, 4);
+  eq("an unknown groups_expanded throws rather than silently expanding",
+     throws({ type: "x", all_entities: true, group_by: "device", groups_expanded: "partially" }), true);
+  eq("a numeric groups_expanded throws",
+     throws({ type: "x", all_entities: true, group_by: "device", groups_expanded: 1 }), true);
+  eq("an inherited property name is not a valid groups_expanded",
+     throws({ type: "x", all_entities: true, group_by: "device", groups_expanded: "constructor" }), true);
+  eq("an empty groups_expanded is treated as expanded",
+     throws({ type: "x", all_entities: true, group_by: "device", groups_expanded: "" }), false);
+  eq("the error names the valid values", (function () {
+    try { document.createElement("unavailable-entity-card")
+      .setConfig({ type: "x", all_entities: true, groups_expanded: "partially" }); return ""; }
+    catch (e) { return /partial/.test(e.message); }
+  })(), true);
+
+  /* --- the badge is untrusted text and a styling hook ---------------- */
+  var evilState = '<img src=x onerror="boom()">';
+  var evilHass = registryHass({ "sensor.evil": mk("sensor.evil", evilState, { friendly_name: "Evil" }) });
+  evilHass.entities = { "sensor.evil": { entity_id: "sensor.evil", labels: [], device_id: "dev_e" } };
+  evilHass.devices = { dev_e: { id: "dev_e", name: "Evil Device", labels: [] } };
+  var evil = grouped(
+    { group_by: "device", groups_expanded: "partial", unavailable_states: [evilState] }, evilHass);
+  eq("a state on a heading is escaped, not parsed",
+     evil.shadowRoot.querySelector(".group-state").textContent, evilState);
+  eq("no element is injected by the state",
+     evil.shadowRoot.querySelectorAll(".group-state img").length, 0);
+
+  var coldHass = registryHass({ "sensor.cold": mk("sensor.cold", "offline", { friendly_name: "Cold" }) });
+  coldHass.entities = { "sensor.cold": { entity_id: "sensor.cold", labels: [], device_id: "dev_c" } };
+  coldHass.devices = { dev_c: { id: "dev_c", name: "Cold Store", labels: [] } };
+  eq("a custom state colour reaches the heading badge",
+     grouped({
+       group_by: "device",
+       groups_expanded: "partial",
+       unavailable_states: [{ state: "offline", background: "#f0f4c3", color: "#827717" }]
+     }, coldHass).shadowRoot.querySelector(".group-state").getAttribute("style"),
+     "background:#f0f4c3; color:#827717");
+
   /* --- keyboard ----------------------------------------------------- */
   var kb = grouped({ group_by: "device" });
   var kbHeader = sectionFor(kb, "No device").querySelector(".group-header");
@@ -1335,6 +1505,22 @@
   searchIn(foldedThenSearched, "");
   eq("the folded state survives the search",
      foldedThenSearched.shadowRoot.querySelectorAll(".entity-tile").length, 0);
+
+  var partialSearched = grouped({ group_by: "device", groups_expanded: "partial", search: true });
+  searchIn(partialSearched, "hall");
+  eq("a query opens a folded total outage",
+     groupIds(partialSearched, "Hallway Motion").length, 1);
+  eq("the badge stays put while filtering",
+     groupState(partialSearched, "Hallway Motion"), "unknown");
+  searchIn(partialSearched, "kitchen");
+  eq("a filtered-down group is not mistaken for a total outage",
+     groupState(partialSearched, "Kitchen Multisensor"), null);
+  searchIn(partialSearched, "temperature");
+  eq("nor is one the query has cut to a single row",
+     isFolded(partialSearched, "Kitchen Multisensor"), false);
+  searchIn(partialSearched, "");
+  eq("the fold comes back when the query clears",
+     isFolded(partialSearched, "Hallway Motion"), true);
 
   var noMatchGrouped = grouped({ group_by: "device", search: true });
   searchIn(noMatchGrouped, "nothing_here");

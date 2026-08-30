@@ -97,7 +97,7 @@
 
   var OFFLINE_STYLE = [{ state: "offline", background: "#f0f4c3", color: "#827717" }];
 
-  /* ?case=default (the README hero) | ?case=grouped */
+  /* ?case=default (the README hero) | ?case=grouped | ?case=partial */
   var CASES = {};
 
   CASES.default = function () {
@@ -176,6 +176,53 @@
           if (header.querySelector(".group-title").textContent === "EPSON L3250 Series") header.click();
         });
       }
+    };
+  };
+
+  CASES.partial = function () {
+    /* The printer still has a working entity, so its rows stay on show. The
+       Protect and the UPS have lost everything they own, so each folds to the
+       one line that actually carries news. */
+    var rows = [
+      ["sensor.epson_l3250_ink_black", "Black Ink", "unavailable", "dev_printer"],
+      ["sensor.epson_l3250_status", "Status", "unavailable", "dev_printer"],
+      ["sensor.epson_l3250_ink_colour", "Colour Ink", "82", "dev_printer"],
+      ["binary_sensor.hallway_protect_online", "Hallway Protect Online", "unavailable", "dev_protect"],
+      ["sensor.hallway_protect_battery", "Hallway Protect Battery", "unavailable", "dev_protect"],
+      ["sensor.hallway_protect_co", "Hallway Protect CO", "unavailable", "dev_protect"],
+      ["sensor.ups_status", "UPS Status", "offline", "dev_ups"],
+      ["sensor.ups_load", "UPS Load", "offline", "dev_ups"],
+      ["sensor.internet_uptime", "Internet Uptime", "unavailable", null]
+    ];
+
+    var states = {};
+    var entities = {};
+    rows.forEach(function (row) {
+      states[row[0]] = st(row[0], row[2], { friendly_name: row[1] });
+      entities[row[0]] = { entity_id: row[0], labels: [] };
+      if (row[3]) entities[row[0]].device_id = row[3];
+    });
+
+    return {
+      hass: {
+        states: states,
+        entities: entities,
+        devices: {
+          dev_printer: { id: "dev_printer", name: "EPSON L3250 Series", labels: [] },
+          dev_protect: { id: "dev_protect", name: "Nest Protect", name_by_user: "Hallway Protect", labels: [] },
+          dev_ups: { id: "dev_ups", name: "APC Back-UPS", labels: [] }
+        },
+        areas: {}
+      },
+      configs: [
+        {
+          title: "Unavailable by device",
+          group_by: "device",
+          groups_expanded: "partial",
+          all_entities: true,
+          unavailable_states: OFFLINE_STYLE
+        }
+      ]
     };
   };
 

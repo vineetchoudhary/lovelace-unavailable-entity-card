@@ -30,6 +30,17 @@ const GROUP_FALLBACK_LABELS = {
 };
 const UNGROUPED_KEY = "__ungrouped__";
 
+const GROUPS_EXPANDED_ALL = "all";
+const GROUPS_EXPANDED_NONE = "none";
+const GROUPS_EXPANDED_PARTIAL = "partial";
+const GROUPS_EXPANDED_ALIASES = new Map([
+  ["true", GROUPS_EXPANDED_ALL],
+  ["all", GROUPS_EXPANDED_ALL],
+  ["false", GROUPS_EXPANDED_NONE],
+  ["none", GROUPS_EXPANDED_NONE],
+  ["partial", GROUPS_EXPANDED_PARTIAL]
+]);
+
 const HTML_ESCAPES = {
   "&": "&amp;",
   "<": "&lt;",
@@ -128,6 +139,27 @@ const normalizeGroupBy = (value) => {
   const resolved = GROUP_ALIASES[key] || key;
   if (!GROUP_MODES.has(resolved)) {
     throw new Error(`Unknown group_by "${value}". Use one of: ${[...GROUP_MODES].join(", ")}`);
+  }
+  return resolved;
+};
+
+const normalizeGroupsExpanded = (value) => {
+  if (value === undefined || value === null || value === true) {
+    return GROUPS_EXPANDED_ALL;
+  }
+  if (value === false) {
+    return GROUPS_EXPANDED_NONE;
+  }
+  if (typeof value !== "string") {
+    throw new Error("groups_expanded must be true, false or partial");
+  }
+  const key = value.trim().toLowerCase();
+  if (!key) {
+    return GROUPS_EXPANDED_ALL;
+  }
+  const resolved = GROUPS_EXPANDED_ALIASES.get(key);
+  if (!resolved) {
+    throw new Error(`Unknown groups_expanded "${value}". Use true, false or partial.`);
   }
   return resolved;
 };
@@ -417,6 +449,18 @@ const CARD_STYLES = `
     border-radius: 999px;
   }
 
+  .group-state {
+    flex: 0 0 auto;
+    background: rgba(var(--rgb-warning-color, 255, 166, 0), 0.15);
+    color: var(--warning-color);
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 1px 8px;
+    border-radius: 999px;
+  }
+
   .group-icon {
     flex: 0 0 auto;
     margin-left: auto;
@@ -518,7 +562,8 @@ class UnavailableEntityCard extends HTMLElement {
     this._query = "";
     this._groupBy = GROUP_NONE;
     this._groupState = new Map();
-    this._groupsExpandedByDefault = true;
+    this._groupsExpanded = GROUPS_EXPANDED_ALL;
+    this._completeGroups = new Map();
 
     this._handleClick = this._handleClick.bind(this);
     this._handleKeydown = this._handleKeydown.bind(this);
@@ -566,8 +611,9 @@ class UnavailableEntityCard extends HTMLElement {
       .filter((entry) => entry && typeof entry.entity === "string" && entry.entity !== "");
 
     this._groupBy = normalizeGroupBy(config.group_by);
-    this._groupsExpandedByDefault = config.groups_expanded !== false;
+    this._groupsExpanded = normalizeGroupsExpanded(config.groups_expanded);
     this._groupState = new Map();
+    this._completeGroups = new Map();
 
     if (buildStateFilter(config.include)) {
       throw new Error("states is only supported inside exclude, not include");
@@ -651,15 +697,32 @@ class UnavailableEntityCard extends HTMLElement {
   }
 
   _calculateEntities() {
+    this._completeGroups = new Map();
+
     if (!this._config || !this._hass || !this._hass.states) {
       return [];
     }
+
+    // A heading is only a total outage once every entity the card watches under
+    // it is down, so the denominator has to be tallied while the numerator is
+    // being filtered -- healthy rows never reach the output list.
+    const totals = this._tracksGroupTotals() ? new Map() : undefined;
+    const countWatched = (entityId) => {
+      if (!totals) {
+        return;
+      }
+      const key = this._groupKeyFor(entityId);
+      if (key && key !== UNGROUPED_KEY) {
+        totals.set(key, (totals.get(key) || 0) + 1);
+      }
+    };
 
     const listed = new Set();
     const output = [];
 
     for (const entry of this._config.entities) {
       listed.add(entry.entity);
+      countWatched(entry.entity);
       const entity = this._hass.states[entry.entity];
 
       if (!entity) {
@@ -683,6 +746,7 @@ class UnavailableEntityCard extends HTMLElement {
     }
 
     if (!this._discover) {
+      this._completeGroups = this._findCompleteGroups(output, totals);
       return output;
     }
 
@@ -702,6 +766,8 @@ class UnavailableEntityCard extends HTMLElement {
         continue;
       }
 
+      countWatched(entityId);
+
       const entity = this._hass.states[entityId];
       if (!entity || !this._unavailableStates.has(entity.state)) {
         continue;
@@ -712,7 +778,48 @@ class UnavailableEntityCard extends HTMLElement {
 
     discovered.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
 
-    return output.concat(discovered);
+    const entities = output.concat(discovered);
+    this._completeGroups = this._findCompleteGroups(entities, totals);
+    return entities;
+  }
+
+  _tracksGroupTotals() {
+    // Counting every watched entity costs a registry lookup each, so it is only
+    // worth doing when a fold can actually hide something.
+    return this._groupBy !== GROUP_NONE && this._groupsExpanded !== GROUPS_EXPANDED_ALL;
+  }
+
+  _findCompleteGroups(entities, totals) {
+    const complete = new Map();
+    if (!totals) {
+      return complete;
+    }
+
+    const seen = new Map();
+    for (const entity of entities) {
+      const key = entity.group ? entity.group.key : undefined;
+      if (!key || key === UNGROUPED_KEY) {
+        continue;
+      }
+      let bucket = seen.get(key);
+      if (!bucket) {
+        bucket = { count: 0, states: new Set() };
+        seen.set(key, bucket);
+      }
+      bucket.count += 1;
+      bucket.states.add(entity.state);
+    }
+
+    for (const [key, bucket] of seen) {
+      const total = totals.get(key);
+      if (total > 0 && bucket.count >= total) {
+        // Devices normally fail as a unit, but a mix of unavailable and unknown
+        // is possible, and naming one of them would misreport the other.
+        complete.set(key, [...bucket.states].join(", "));
+      }
+    }
+
+    return complete;
   }
 
   _describeEntity(entity, entry) {
@@ -859,7 +966,9 @@ class UnavailableEntityCard extends HTMLElement {
     };
   }
 
-  _resolveGroup(entityId) {
+  _groupKeyFor(entityId) {
+    // Name resolution goes through hass.localize, which is far too expensive to
+    // run once per watched entity, so the key is resolvable on its own.
     if (this._groupBy === GROUP_NONE || !this._hass) {
       return undefined;
     }
@@ -867,37 +976,50 @@ class UnavailableEntityCard extends HTMLElement {
     if (this._groupBy === "domain") {
       const separator = entityId.indexOf(".");
       const domain = separator === -1 ? "" : entityId.slice(0, separator);
-      return domain
-        ? { key: `domain:${domain}`, name: this._integrationName(domain) }
-        : this._fallbackGroup();
+      return domain ? `domain:${domain}` : UNGROUPED_KEY;
     }
 
     const entry = this._registryEntry(entityId);
     const deviceId = entry && typeof entry.device_id === "string" ? entry.device_id : undefined;
-    const device = deviceId && this._hass.devices ? this._hass.devices[deviceId] : undefined;
 
     if (this._groupBy === "device") {
-      if (!deviceId) {
-        return this._fallbackGroup();
-      }
-      const name = device ? device.name_by_user || device.name : undefined;
-      return { key: `device:${deviceId}`, name: name || deviceId };
+      return deviceId ? `device:${deviceId}` : UNGROUPED_KEY;
     }
 
     if (this._groupBy === "integration") {
       const platform = entry && typeof entry.platform === "string" ? entry.platform.trim() : "";
-      return platform
-        ? { key: `integration:${platform}`, name: this._integrationName(platform) }
-        : this._fallbackGroup();
+      return platform ? `integration:${platform}` : UNGROUPED_KEY;
     }
 
+    const device = deviceId && this._hass.devices ? this._hass.devices[deviceId] : undefined;
     const areaId = (entry && entry.area_id) || (device ? device.area_id : undefined);
-    if (!areaId) {
+    return areaId ? `area:${areaId}` : UNGROUPED_KEY;
+  }
+
+  _resolveGroup(entityId) {
+    const key = this._groupKeyFor(entityId);
+    if (!key) {
+      return undefined;
+    }
+    if (key === UNGROUPED_KEY) {
       return this._fallbackGroup();
     }
-    const area = this._hass.areas ? this._hass.areas[areaId] : undefined;
+
+    const value = key.slice(key.indexOf(":") + 1);
+
+    if (this._groupBy === "domain" || this._groupBy === "integration") {
+      return { key, name: this._integrationName(value) };
+    }
+
+    if (this._groupBy === "device") {
+      const device = this._hass.devices ? this._hass.devices[value] : undefined;
+      const name = device ? device.name_by_user || device.name : undefined;
+      return { key, name: name || value };
+    }
+
+    const area = this._hass.areas ? this._hass.areas[value] : undefined;
     const name = area && typeof area.name === "string" && area.name.trim() !== "" ? area.name : undefined;
-    return { key: `area:${areaId}`, name: name || String(areaId) };
+    return { key, name: name || value };
   }
 
   _buildGroups(entities) {
@@ -914,6 +1036,7 @@ class UnavailableEntityCard extends HTMLElement {
           key: group.key,
           name: group.name,
           fallback: group.fallback === true,
+          state: this._completeGroups.get(group.key),
           entities: []
         };
         buckets.set(group.key, bucket);
@@ -940,11 +1063,23 @@ class UnavailableEntityCard extends HTMLElement {
     return this._searchEnabled() && this._query.trim() !== "";
   }
 
+  _defaultGroupCollapsed(key) {
+    if (this._groupsExpanded === GROUPS_EXPANDED_NONE) {
+      return true;
+    }
+    if (this._groupsExpanded === GROUPS_EXPANDED_PARTIAL) {
+      // Nothing to learn from listing a device whose every entity is down; a
+      // heading that still has working entities keeps its rows on show.
+      return this._completeGroups.has(key);
+    }
+    return false;
+  }
+
   _storedGroupCollapsed(key) {
     if (this._groupState.has(key)) {
       return this._groupState.get(key);
     }
-    return !this._groupsExpandedByDefault;
+    return this._defaultGroupCollapsed(key);
   }
 
   _isGroupCollapsed(key) {
@@ -1186,12 +1321,17 @@ class UnavailableEntityCard extends HTMLElement {
       this._searchEnabled(),
       this._searchEnabled() ? this._query.trim().toLowerCase() : "",
       this._groupBy,
+      this._groupsExpanded,
       this._groupBy === GROUP_NONE
         ? ""
         : [...this._groupState.entries()]
             .sort((a, b) => a[0].localeCompare(b[0]))
             .map(([key, collapsed]) => `${key}:${collapsed ? 1 : 0}`)
             .join("|"),
+      [...this._completeGroups.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([key, state]) => `${key}:${state}`)
+        .join("|"),
       this._entities.map((entity) => [
         entity.id,
         entity.name,
@@ -1388,11 +1528,20 @@ class UnavailableEntityCard extends HTMLElement {
         const chevron = interactive
           ? '<ha-icon class="group-icon" icon="mdi:chevron-down"></ha-icon>'
           : "";
+        const stateStyle = group.state ? this._getStateStyle(group.state) : "";
+        const stateBadge = group.state
+          ? `<span class="group-state"${
+              stateStyle ? ` style="${stateStyle}"` : ""
+            }>${escapeHtml(group.state)}</span>`
+          : "";
 
         return `
-          <section class="entity-group${collapsed ? " collapsed" : ""}">
+          <section class="entity-group${collapsed ? " collapsed" : ""}${
+            group.state ? " complete" : ""
+          }">
             <div class="group-header"${headerAttributes}>
               <span class="group-title">${escapeHtml(group.name)}</span>
+              ${stateBadge}
               <span class="group-count">${group.entities.length}</span>
               ${chevron}
             </div>

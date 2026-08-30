@@ -23,4 +23,10 @@ Browser test suite for `unavailable-entity-card.js`. No build step, no dependenc
 ./test/capture-preview.sh
 ```
 
-That renders the page in headless Chrome/Edge at 2x and writes the PNG. Pass a width and height to change the framing — `./test/capture-preview.sh 1000 455`. 
+That renders the page in headless Chrome/Edge at 2x and writes the PNG. Pass a width and height to change the framing — `./test/capture-preview.sh 1000 455`.
+
+`--case` picks a different scenario and writes `screenshots/screenshot-<case>.png`: `grouped` for `group_by: device`, `partial` for `groups_expanded: partial`.
+
+```bash
+./test/capture-preview.sh 1000 528 --case=partial
+``` 
